@@ -1,123 +1,160 @@
 import logictensornetworks as ltn
+import tensorflow as tf
 import numpy as np
-import csv, math, pdb
+import csv, pdb
+import timeit
 
-ltn.default_layers = 6
-ltn.default_smooth_factor = 1e-10
-ltn.default_tnorm = "goedel"
+ltn.default_layers = 2
+ltn.default_smooth_factor = 1e-15
+ltn.default_tnorm = "luk"
 ltn.default_aggregator = "hmean"
-ltn.default_clause_aggregator = "min"
+ltn.default_positive_fact_penality = 0.
+ltn.default_clauses_aggregator = "hmean"
 
-data_training_dir = "data/small_training/"
+data_training_dir = "data/training/"
 data_testing_dir = "data/testing/"
+zero_distance_threshold = 6
+number_of_features = 65
 
-with open("data/classes.csv") as f:
-    types = f.read().splitlines()
-number_of_features = len(types) + 4
+types = np.genfromtxt("data/classes.csv", dtype='U', delimiter=",")
 
-def get_train_data(max_rows=0):
-    path = data_training_dir+"bbFeaturesTrain.csv"
-    if max_rows:
-        result = np.genfromtxt(path,delimiter=",",max_rows=max_rows)
-    else:
-        result = np.genfromtxt(path,delimiter=",")
-    for data in result:
-        for i in range(1,5):
-            data[-i] = data[-i]/500
-    return result
+# uncomment this line for training the vehicle object types
+# selected_types = np.array(['aeroplane','artifact_wing','body','engine','stern','wheel','bicycle','chain_wheel','handlebar','headlight','saddle','bus','bodywork','door','license_plate','mirror','window','car','motorbike','train','coach','locomotive','boat'])
 
-def get_test_data(max_rows=0):
-    path = data_testing_dir+"bbFeaturesTest.csv"
-    if max_rows:
-        result = np.genfromtxt(path,delimiter=",",max_rows=max_rows)
-    else:
-        result = np.genfromtxt(path,delimiter=",")
-    for data in result:
-        for i in range(1,5):
-            data[-i] = data[-i]/500
-    return result
+# uncomment this line for training the indoor object types
+selected_types = np.array(
+    ['bottle', 'body', 'cap', 'pottedplant', 'plant', 'pot', 'tvmonitor', 'screen', 'chair', 'sofa', 'diningtable'])
 
-def get_types_of_train_data(max_rows=0):
-    path = data_training_dir+"bbUnaryPredicatesTrain.txt"
-    if max_rows:
-        idx_of_type_of_train_data = np.genfromtxt(path,
-            delimiter=",",max_rows=max_rows,dtype=np.int)
-    else:
-        idx_of_type_of_train_data = np.genfromtxt(path,
-            delimiter=",",dtype=np.int)
-    return np.array([types[idx] for idx in idx_of_type_of_train_data])
+# uncomment this line for training the animal object types
+# selected_types = np.array(['person','arm','ear','ebrow','foot','hair','hand','mouth','nose','eye','head','leg','neck','torso','cat','tail','bird','animal_wing','beak','sheep','horn','muzzle','cow','dog','horse','hoof'])
 
-def get_types_of_test_data(max_rows=0):
-    path = data_testing_dir+"bbUnaryPredicatesTest.txt"
-    if max_rows:
-        idx_of_type_of_test_data = np.genfromtxt(path,
-            delimiter=",",max_rows=max_rows,dtype=np.int)
-    else:
-        idx_of_type_of_test_data = np.genfromtxt(path,
-            delimiter=",",dtype=np.int)
-    return np.array([types[idx] for idx in idx_of_type_of_test_data])
+# uncomment this line for training all the object types
+# selected_types = types[1:]
 
-def get_partof_of_train_data(train_data):
-    return np.genfromtxt(data_training_dir+"bbPartOfTrain.txt",
-        dtype=np.int,delimiter=",",max_rows=len(train_data))
+objects = ltn.Domain(number_of_features - 1, label="a_bounding_box")
 
-def get_partof_of_test_data(test_data):
-    return np.genfromtxt(data_testing_dir+"bbPartOfTest.txt",
-        dtype=np.int,delimiter=",",max_rows=len(test_data))
+pairs_of_objects = ltn.Domain(2 * (number_of_features - 1) + 2, label="a_pair_of_bounding_boxes")
 
-def get_pics(data):
-    result = {}
-    for i in range(len(data)):
-        if data[i][0] in result:
-            result[data[i][0]].append(i)
+isOfType = {}
+for t in selected_types:
+    isOfType[t] = ltn.Predicate("is_of_type_" + t, objects, layers=5)
+isPartOf = ltn.Predicate("is_part_of", pairs_of_objects)
+
+objects_of_type = {}
+objects_of_type_not = {}
+for t in selected_types:
+    objects_of_type[t] = ltn.Domain(number_of_features - 1, label="objects_of_type_" + t)
+    objects_of_type_not[t] = ltn.Domain(number_of_features - 1, label="objects_of_type_not_" + t)
+
+object_pairs_in_partOf = ltn.Domain((number_of_features - 1) * 2 + 2,
+                                    label="object_pairs_in_partof_relation")
+object_pairs_not_in_partOf = ltn.Domain((number_of_features - 1) * 2 + 2,
+                                        label="object_pairs_not_in_partof_relation")
+
+
+def containment_ratios_between_two_bbxes(bb1, bb2):
+    bb1_area = (bb1[-2] - bb1[-4]) * (bb1[-1] - bb1[-3])
+    bb2_area = (bb2[-2] - bb2[-4]) * (bb2[-1] - bb2[-3])
+    w_intersec = max(0, min([bb1[-2], bb2[-2]]) - max([bb1[-4], bb2[-4]]))
+    h_intersec = max(0, min([bb1[-1], bb2[-1]]) - max([bb1[-3], bb2[-3]]))
+    bb_area_intersection = w_intersec * h_intersec
+    return [float(bb_area_intersection) / bb1_area, float(bb_area_intersection) / bb2_area]
+
+
+def get_data(train_or_test_swritch, max_rows=10000000):
+    assert train_or_test_swritch == "train" or train_or_test_swritch == "test"
+
+    # Fetching the data from the file system
+
+    if train_or_test_swritch == "train":
+        data_dir = data_training_dir
+    if train_or_test_swritch == "test":
+        data_dir = data_testing_dir
+    data = np.genfromtxt(data_dir + "features.csv", delimiter=",", max_rows=max_rows)
+    types_of_data = types[np.genfromtxt(data_dir + "types.csv", dtype="i", max_rows=max_rows)]
+    idx_whole_for_data = np.genfromtxt(data_dir + "partOf.csv", dtype="i", max_rows=max_rows)
+    test1 = np.all(data[:, -2:] - data[:, -4:-2] >= zero_distance_threshold, axis=1)
+    test2 = np.in1d(types_of_data, selected_types)
+    idx_of_cleaned_data = np.where(np.logical_and(
+        np.all(data[:, -2:] - data[:, -4:-2] >= zero_distance_threshold, axis=1),
+        np.in1d(types_of_data, selected_types)))[0]
+    print("deleting", len(data) - len(idx_of_cleaned_data), "small bb out of", data.shape[0], "bb")
+    data = data[idx_of_cleaned_data]
+    data[:, -4:] /= 500
+
+    # Cleaning data by removing small bounding boxes and recomputing indexes of partof data
+
+    types_of_data = types_of_data[idx_of_cleaned_data]
+    idx_whole_for_data = idx_whole_for_data[idx_of_cleaned_data]
+    for i in range(len(idx_whole_for_data)):
+        if idx_whole_for_data[i] != -1 and idx_whole_for_data[i] in idx_of_cleaned_data:
+            idx_whole_for_data[i] = np.where(idx_whole_for_data[i] == idx_of_cleaned_data)[0]
         else:
-            result[data[i][0]] = [i]
-    return result
+            idx_whole_for_data[i] = -1
+
+    # Grouping bbs that belong to the same picture
+
+    pics = {}
+    for i in range(len(data)):
+        if data[i][0] in pics:
+            pics[data[i][0]].append(i)
+        else:
+            pics[data[i][0]] = [i]
+
+    pairs_of_data = np.array(
+        [np.concatenate((data[i][1:], data[j][1:], containment_ratios_between_two_bbxes(data[i], data[j]))) for p in
+         pics for i in pics[p] for j in pics[p]])
+
+    pairs_of_bb_idxs = np.array([(i, j) for p in pics for i in pics[p] for j in pics[p]])
+
+    partOf_of_pair_of_data = np.array([idx_whole_for_data[i] == j for p in pics for i in pics[p] for j in pics[p]])
+
+    return data, pairs_of_data, types_of_data, partOf_of_pair_of_data, pairs_of_bb_idxs, pics
+
 
 def get_part_whole_ontology():
     with open('data/pascalPartOntology.csv') as f:
         ontologyReader = csv.reader(f)
-        parts = {}
-        wholes = {}
+        parts_of_whole = {}
+        wholes_of_part = {}
         for row in ontologyReader:
-            parts[row[0]]=row[1:]
+            parts_of_whole[row[0]] = row[1:]
             for t in row[1:]:
-                if t in wholes:
-                    wholes[t].append(row[0])
+                if t in wholes_of_part:
+                    wholes_of_part[t].append(row[0])
                 else:
-                    wholes[t] = [row[0]]
-    return parts, wholes
+                    wholes_of_part[t] = [row[0]]
+        for whole in parts_of_whole:
+            wholes_of_part[whole] = []
+        for part in wholes_of_part:
+            if part not in parts_of_whole:
+                parts_of_whole[part] = []
+    selected_parts_of_whole = {}
+    selected_wholes_of_part = {}
+    for t in selected_types:
+        selected_parts_of_whole[t] = [p for p in parts_of_whole[t] if p in selected_types]
+        selected_wholes_of_part[t] = [w for w in wholes_of_part[t] if w in selected_types]
+    return selected_parts_of_whole, selected_wholes_of_part
 
-def compute_extra_features(bb1,bb2):
-    bb_area_intersection = 0.0
-    bb1_area = (bb1[2] - bb1[0] + 1) * (bb1[3] - bb1[1] + 1)
-    bb2_area = (bb2[2] - bb2[0] + 1) * (bb2[3] - bb2[1] + 1)
-    w_intersec = np.min([bb1[2], bb2[2]]) - np.max([bb1[0], bb2[0]]) + 1
-    h_intersec = np.min([bb1[3], bb2[3]]) - np.max([bb1[1], bb2[1]]) + 1
 
-    if w_intersec > 0 and h_intersec > 0:
-        bb_area_intersection = w_intersec * h_intersec
+# reporting measures
 
-    return [float(bb_area_intersection)/bb1_area, float(bb_area_intersection)/bb2_area]
-
-def containment_ratios_between_two_bbxes(bb1, bb2):
-    bb1_area = (bb1[-2] - bb1[-4]) * (bb1[-1] - bb1[-3]) + 1.0/250000
-    bb2_area = (bb2[-2] - bb2[-4]) * (bb2[-1] - bb2[-3]) + 1.0/250000
-    w_intersec = np.min([bb1[-2], bb2[-2]]) - np.max([bb1[-4], bb2[-4]])
-    h_intersec = np.min([bb1[-1], bb2[-1]]) - np.max([bb1[-3], bb2[-3]])
-
-    if w_intersec > 0 and h_intersec > 0:
-        bb_area_intersection = w_intersec * h_intersec
+def precision(conf_matrix, prediction_array=None):
+    if prediction_array is not None:
+        return conf_matrix.diagonal() / prediction_array
     else:
-        bb_area_intersection = 0.0
+        return conf_matrix.diagonal() / conf_matrix.sum(1).T
 
-    return [float(bb_area_intersection)/bb1_area, float(bb_area_intersection)/bb2_area]
 
-object = ltn.Domain(1,number_of_features,label="a_generic_object")
-pairOfObjects = ltn.Domain(1,2*number_of_features+2,label="a_generic_pair_of_objects")
-isOfType = {}
+def recall(conf_matrix, gold_array=None):
+    if gold_array is not None:
+        return conf_matrix.diagonal() / gold_array
+    else:
+        return conf_matrix.diagonal() / conf_matrix.sum(0)
 
-for t in types:
-    isOfType[t] = ltn.Predicate("is_a"+t,[object])
-isPartOf = ltn.Predicate("is_part_of",[pairOfObjects])
-print("end of pascalpart.py")
+
+def f1(precision, recall):
+    return np.multiply(2 * precision, recall) / (precision + recall)
+
+
+print("end of new pascalpart.py")
