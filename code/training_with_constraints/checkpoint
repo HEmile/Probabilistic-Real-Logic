@@ -1,0 +1,2 @@
+model_checkpoint_path: "KB_for_pascalpart.ckpt"
+all_model_checkpoint_paths: "KB_for_pascalpart.ckpt"
