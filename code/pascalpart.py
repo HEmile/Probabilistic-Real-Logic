@@ -120,4 +120,4 @@ isOfType = {}
 for t in types:
     isOfType[t] = ltn.Predicate("is_a"+t,[object])
 isPartOf = ltn.Predicate("is_part_of",[pairOfObjects])
-print "end of pascalpart.py"
+print("end of pascalpart.py")

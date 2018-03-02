@@ -92,7 +92,7 @@ def unary_predicate_eval(save_path='', decision_threshold=0.5, label='', sess = 
     np.savetxt(os.path.join(save_path, 'CM_types_' + label + '.csv'), confusion_matrix, delimiter=",")
     fig.savefig(os.path.join(save_path, 'CM_types_' + label + '.png'))
 
-    print "th %f --> prec %f, rec %f, f1 %f" % (decision_threshold, mean_prec, mean_rec, mean_f1)
+    print("th %f --> prec %f, rec %f, f1 %f" % (decision_threshold, mean_prec, mean_rec, mean_f1))
     return [mean_prec, mean_rec, mean_f1]
 
 def binary_predicate_eval(save_path='', decision_threshold=0.5, label='', sess = tf.Session(config=config)):
@@ -106,7 +106,7 @@ def binary_predicate_eval(save_path='', decision_threshold=0.5, label='', sess =
     tp_fn = tf.greater_equal(predicate_eval_tensor, threshold_tensor)
     tp_fn_ints = tf.cast(tp_fn, tf.int32)
     tp_tensor = tf.reduce_sum(tp_fn_ints)
-    fn_tensor = tf.sub(tf.shape(predicate_eval_tensor), tp_tensor)[0]
+    fn_tensor = tf.subtract(tf.shape(predicate_eval_tensor), tp_tensor)[0]
     tp = sess.run(tp_tensor)
     fn = sess.run(fn_tensor)
 
@@ -127,7 +127,7 @@ def binary_predicate_eval(save_path='', decision_threshold=0.5, label='', sess =
     fp_tn = tf.greater_equal(predicate_eval_tensor, threshold_tensor)
     fp_tn_ints = tf.cast(fp_tn, tf.int32)
     fp_tensor = tf.reduce_sum(fp_tn_ints)
-    tn_tensor = tf.sub(tf.shape(predicate_eval_tensor), fp_tensor)[0]
+    tn_tensor = tf.subtract(tf.shape(predicate_eval_tensor), fp_tensor)[0]
     fp = sess.run(fp_tensor)
     tn = sess.run(tn_tensor)
 
@@ -149,7 +149,7 @@ def binary_predicate_eval(save_path='', decision_threshold=0.5, label='', sess =
     np.savetxt(os.path.join(save_path, 'CM_partOf_' + label + '.csv'), confusion_matrix, delimiter=",")
     np.savetxt(os.path.join(save_path, 'precRecF1_partOf_' + label + '.csv'), prec_rec_f1, delimiter=",")
     fig.savefig(os.path.join(save_path, 'CM_partOf_' + label + '.png'))
-    print "th %f --> prec %f, rec %f, f1 %f, tp %f, fp %f, fn %f, tn %f"%(decision_threshold, prec, rec, f1, tp, fp, fn, tn)
+    print("th %f --> prec %f, rec %f, f1 %f, tp %f, fp %f, fn %f, tn %f"%(decision_threshold, prec, rec, f1, tp, fp, fn, tn))
     return [prec, rec, f1]
 
 training_data = get_train_data()
@@ -270,10 +270,10 @@ for model in models:
     save_path = os.path.join(path_to_reports, os.path.split(model)[0])
 
     for th in threshold_space:
-        print "model %s with threshold %.3f"%(model, th)
-        print "types evaluation..."
+        print("model %s with threshold %.3f"%(model, th))
+        print("types evaluation...")
         unary_pred_results = unary_predicate_eval(save_path, th, model_label, sess=sess)
-        print "partOf evaluation..."
+        print("partOf evaluation...")
         binary_pred_results = binary_predicate_eval(save_path, th, model_label, sess=sess)
 
         th_results = th_results + unary_pred_results + binary_pred_results
