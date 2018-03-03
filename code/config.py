@@ -5,7 +5,7 @@ FREQ_OF_FEED_DICT_GENERATION = 10
 
 SATURATION_LIMIT = 0.95
 
-NOISE_VALUES = [0.]
+NOISE_VALUES = [0., 0.1, 0.2, 0.3, 0.4]
 
 # List. Return [True, False] to create models for both training with and without constraints.
 WC_TRAIN = [True, False]
@@ -21,6 +21,6 @@ FORALL_AGGREGATOR = "hmean"
 
 POSITIVE_FACT_PENALTY = 0.
 
-CLAUSE_AGGREGATOR = "hmean"
+CLAUSE_AGGREGATOR = "log-likelihood"
 
 OPTIMIZER = 'rmsprop'

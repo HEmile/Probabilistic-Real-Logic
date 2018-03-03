@@ -3,6 +3,7 @@ from collections import Counter
 import csv
 import pdb, os
 import matplotlib
+import config
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -15,7 +16,7 @@ np.set_printoptions(precision=2)
 np.set_printoptions(threshold=np.inf)
 
 # swith between GPU and CPU
-config = tf.ConfigProto(device_count={'GPU': 1})
+tf_config = tf.ConfigProto(device_count={'GPU': 1})
 
 thresholds = np.arange(.00, 1.1, .05)
 models_dir = "models/"
@@ -23,8 +24,13 @@ results_dir = "results"
 
 # errors_percentage = np.array([0.0, 0.1, 0.2, 0.3, 0.4])
 # constraints_choice = ["KB_wc_nr_", "KB_nc_nr_"]
-errors_percentage = np.array([0.0])
-constraints_choice = ["KB_wc_nr_", "KB_nc_nr_"]
+errors_percentage = np.array(config.NOISE_VALUES)
+
+constraints_choice = []
+if True in config.WC_TRAIN:
+    constraints_choice.append("KB_wc_nr_")
+if False in config.WC_TRAIN:
+    constraints_choice.append("KB_nc_nr_")
 paths_to_models = ["baseline"]
 labels_of_models = ["baseline"]
 
@@ -143,7 +149,7 @@ def compute_values_atomic_formulas(path_to_model):
     predicted_types_values_tensor = tf.concat([isOfType[t].tensor() for t in selected_types], 1)
     predicted_partOf_value_tensor = ltn.Literal(True, isPartOf, pairs_of_objects).tensor
     saver = tf.train.Saver()
-    sess = tf.Session(config=config)
+    sess = tf.Session(config=tf_config)
     saver.restore(sess, path_to_model)
     values_of_types = sess.run(predicted_types_values_tensor, {objects.tensor: test_data[:, 1:]})
     values_of_partOf = sess.run(predicted_partOf_value_tensor, {pairs_of_objects.tensor: pairs_of_test_data})
