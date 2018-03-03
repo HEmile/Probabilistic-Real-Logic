@@ -5,17 +5,24 @@ FREQ_OF_FEED_DICT_GENERATION = 10
 
 SATURATION_LIMIT = 0.95
 
-NOISE_VALUES = [0., 0.1, 0.2, 0.3, 0.4]
+NOISE_VALUES = [0.]
+
+# Options: 'all', 'indoor', 'vehicle', 'animal'
+DATASET = 'indoor'
 
 # List. Return [True, False] to create models for both training with and without constraints.
 WC_TRAIN = [True, False]
 
 # LOGIC TENSOR NETWORK SETUP
-LAYERS = 2
+DEFAULT_LAYERS = 2
 
-REGULARIZATION = 1e-15
+TYPE_LAYERS = 5
 
-TNORM = "luk"
+PART_OF_LAYERS = 2
+
+REGULARIZATION = 1e-5
+
+TNORM = "product"
 
 FORALL_AGGREGATOR = "hmean"
 

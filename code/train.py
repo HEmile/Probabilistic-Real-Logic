@@ -52,7 +52,7 @@ clause_for_negative_examples_of_partOf = [ltn.Clause([ltn.Literal(False, isPartO
                                                      weight=1.0)]
 
 # defining axioms from the partOf ontology
-
+# def create_constraints():
 parts_of_whole, wholes_of_part = get_part_whole_ontology()
 
 w1 = {}
@@ -99,6 +99,8 @@ clauses_for_disjoint_types = [ltn.Clause([ltn.Literal(False, isOfType[t], o),
 
 clause_for_at_least_one_type = [
     ltn.Clause([ltn.Literal(True, isOfType[t], o) for t in selected_types], label="an_object_has_at_least_one_type")]
+# return partof_is_irreflexive + partOf_is_antisymmetric + clauses_for_wholes_of_parts + \
+#     clauses_for_parts_of_wholes + clauses_for_disjoint_types + clause_for_at_least_one_type
 
 
 def add_noise_to_data(noise_ratio):
@@ -178,12 +180,8 @@ def train(number_of_training_iterations=2500,
               clause_for_negative_examples_of_partOf
 
     if with_constraints:
-        clauses += partof_is_irreflexive + \
-                   partOf_is_antisymmetric + \
-                   clauses_for_wholes_of_parts + \
-                   clauses_for_parts_of_wholes + \
-                   clauses_for_disjoint_types + \
-                   clause_for_at_least_one_type
+        clauses += partof_is_irreflexive + partOf_is_antisymmetric + clauses_for_wholes_of_parts + \
+            clauses_for_parts_of_wholes + clauses_for_disjoint_types + clause_for_at_least_one_type
 
     # defining the label of the background knowledge
     if with_constraints:
@@ -298,8 +296,6 @@ def get_feed_dict(idxs_of_pos_ex_of_types,
     #     print(k.name, feed_dict[k].shape)
     return feed_dict
 
-# for nr in [0.0, 0.1, 0.2, 0.3, 0.4]:
-#     for wc in [True, False]:
 for nr in config.NOISE_VALUES:
     for wc in config.WC_TRAIN:
         train(number_of_training_iterations=config.MAX_TRAINING_ITERATIONS,

@@ -3,13 +3,7 @@ import tensorflow as tf
 import numpy as np
 import csv, pdb
 import timeit
-
-ltn.layers = 2
-ltn.regularization = 1e-15
-ltn.tnorm = "luk"
-ltn.forall_aggregator = "hmean"
-ltn.positive_fact_penalty = 0.
-ltn.clauses_aggregator = "log-likelihood"
+import config
 
 data_training_dir = "data/training/"
 data_testing_dir = "data/testing/"
@@ -18,18 +12,15 @@ number_of_features = 65
 
 types = np.genfromtxt("data/classes.csv", dtype='U', delimiter=",")
 
-# uncomment this line for training the vehicle object types
-# selected_types = np.array(['aeroplane','artifact_wing','body','engine','stern','wheel','bicycle','chain_wheel','handlebar','headlight','saddle','bus','bodywork','door','license_plate','mirror','window','car','motorbike','train','coach','locomotive','boat'])
-
-# uncomment this line for training the indoor object types
-selected_types = np.array(
-    ['bottle', 'body', 'cap', 'pottedplant', 'plant', 'pot', 'tvmonitor', 'screen', 'chair', 'sofa', 'diningtable'])
-
-# uncomment this line for training the animal object types
-# selected_types = np.array(['person','arm','ear','ebrow','foot','hair','hand','mouth','nose','eye','head','leg','neck','torso','cat','tail','bird','animal_wing','beak','sheep','horn','muzzle','cow','dog','horse','hoof'])
-
-# uncomment this line for training all the object types
-# selected_types = types[1:]
+if config.DATASET == 'vehicle':
+    selected_types = np.array(['aeroplane','artifact_wing','body','engine','stern','wheel','bicycle','chain_wheel','handlebar','headlight','saddle','bus','bodywork','door','license_plate','mirror','window','car','motorbike','train','coach','locomotive','boat'])
+if config.DATASET == 'indoor':
+    selected_types = np.array(
+        ['bottle', 'body', 'cap', 'pottedplant', 'plant', 'pot', 'tvmonitor', 'screen', 'chair', 'sofa', 'diningtable'])
+if config.DATASET == 'animal':
+    selected_types = np.array(['person','arm','ear','ebrow','foot','hair','hand','mouth','nose','eye','head','leg','neck','torso','cat','tail','bird','animal_wing','beak','sheep','horn','muzzle','cow','dog','horse','hoof'])
+if config.DATASET == 'all':
+    selected_types = types[1:]
 
 objects = ltn.Domain(number_of_features - 1, label="a_bounding_box")
 
@@ -37,9 +28,10 @@ pairs_of_objects = ltn.Domain(2 * (number_of_features - 1) + 2, label="a_pair_of
 
 isOfType = {}
 for t in selected_types:
-    isOfType[t] = ltn.Predicate("is_of_type_" + t, objects, layers=5)
-isPartOf = ltn.Predicate("is_part_of", pairs_of_objects)
+    isOfType[t] = ltn.Predicate("is_of_type_" + t, objects, config.TYPE_LAYERS)
+isPartOf = ltn.Predicate("is_part_of", pairs_of_objects, config.PART_OF_LAYERS)
 
+# Create domains for each object type
 objects_of_type = {}
 objects_of_type_not = {}
 for t in selected_types:
@@ -111,7 +103,7 @@ def get_data(train_or_test_swritch, max_rows=10000000):
 
     return data, pairs_of_data, types_of_data, partOf_of_pair_of_data, pairs_of_bb_idxs, pics
 
-
+# Create two dictionaries that contain ontological partOf relations.
 def get_part_whole_ontology():
     with open('data/pascalPartOntology.csv') as f:
         ontologyReader = csv.reader(f)
@@ -138,7 +130,6 @@ def get_part_whole_ontology():
 
 
 # reporting measures
-
 def precision(conf_matrix, prediction_array=None):
     if prediction_array is not None:
         return conf_matrix.diagonal() / prediction_array
