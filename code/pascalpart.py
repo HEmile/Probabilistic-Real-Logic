@@ -4,12 +4,12 @@ import numpy as np
 import csv, pdb
 import timeit
 
-ltn.default_layers = 2
-ltn.default_smooth_factor = 1e-15
-ltn.default_tnorm = "luk"
-ltn.default_aggregator = "hmean"
-ltn.default_positive_fact_penality = 0.
-ltn.default_clauses_aggregator = "hmean"
+ltn.layers = 2
+ltn.regularization = 1e-15
+ltn.tnorm = "luk"
+ltn.forall_aggregator = "hmean"
+ltn.positive_fact_penalty = 0.
+ltn.clauses_aggregator = "log-likelihood"
 
 data_training_dir = "data/training/"
 data_testing_dir = "data/testing/"

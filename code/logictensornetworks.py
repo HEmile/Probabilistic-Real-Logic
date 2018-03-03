@@ -2,14 +2,16 @@ import sys
 import tensorflow as tf
 import numpy as np
 import pdb
+import config
 
-default_layers = 10
-default_smooth_factor = 0.0000001
-default_tnorm = "product"
-default_optimizer = "gd"
-default_aggregator = "min"
-default_positive_fact_penality = 1e-6
-default_clauses_aggregator = "min"
+# Note: These values are overwritten in pascalpart.py
+layers = config.LAYERS
+regularization = config.REGULARIZATION
+tnorm = config.TNORM
+optimizer = config.OPTIMIZER
+forall_aggregator = config.FORALL_AGGREGATOR
+positive_fact_penalty = config.POSITIVE_FACT_PENALTY
+clauses_aggregator = config.CLAUSE_AGGREGATOR
 
 
 def train_op(loss, optimization_algorithm):
@@ -33,31 +35,31 @@ def PR(tensor):
 def disjunction_of_literals(literals, label="no_label"):
     list_of_literal_tensors = [lit.tensor for lit in literals]
     literals_tensor = tf.concat(list_of_literal_tensors, 1)
-    if default_tnorm == "product":
+    if tnorm == "product":
         result = 1.0 - tf.reduce_prod(1.0 - literals_tensor, 1, keep_dims=True)
-    if default_tnorm == "yager2":
+    if tnorm == "yager2":
         result = tf.minimum(1.0, tf.sqrt(tf.reduce_sum(tf.square(literals_tensor), 1, keep_dims=True)))
-    if default_tnorm == "luk":
+    if tnorm == "luk":
         result = tf.minimum(1.0, tf.reduce_sum(literals_tensor, 1, keep_dims=True))
-    if default_tnorm == "goedel":
+    if tnorm == "goedel":
         result = tf.reduce_max(literals_tensor, 1, keep_dims=True, name=label)
-    if default_aggregator == "product":
+    if forall_aggregator == "product":
         return tf.reduce_prod(result, keep_dims=True)
-    if default_aggregator == "mean":
+    if forall_aggregator == "mean":
         return tf.reduce_mean(result, keep_dims=True, name=label)
-    if default_aggregator == "gmean":
+    if forall_aggregator == "gmean":
         return tf.exp(tf.multiply(tf.reduce_sum(tf.log(result), keep_dims=True),
                              tf.reciprocal(tf.to_float(tf.size(result)))), name=label)
-    if default_aggregator == "hmean":
+    if forall_aggregator == "hmean":
         return tf.div(tf.to_float(tf.size(result)), tf.reduce_sum(tf.reciprocal(result), keep_dims=True))
-    if default_aggregator == "min":
+    if forall_aggregator == "min":
         return tf.reduce_min(result, keep_dims=True, name=label)
 
 
 def smooth(parameters):
     norm_of_omega = tf.reduce_sum(tf.expand_dims(tf.concat([tf.expand_dims(tf.reduce_sum(tf.square(par)), 0) for par in
                                                             parameters], 0), 1))
-    return default_smooth_factor * norm_of_omega
+    return regularization * norm_of_omega
 
 
 class Domain:
@@ -107,7 +109,7 @@ class Function(Domain):
 
 
 class Predicate:
-    def __init__(self, label, domain, layers=default_layers):
+    def __init__(self, label, domain, layers=layers):
         self.label = label
         self.domain = domain
         self.number_of_layers = layers
@@ -146,12 +148,12 @@ class Literal:
         if polarity:
             self.tensor = predicate.tensor(domain)
         else:
-            if default_tnorm == "product" or default_tnorm == "goedel":
+            if tnorm == "product" or tnorm == "goedel":
                 y = tf.equal(predicate.tensor(domain), 0.0)
                 self.tensor = tf.cast(y, tf.float32)
-            if default_tnorm == "yager2":
+            if tnorm == "yager2":
                 self.tensor = 1 - predicate.tensor(domain)
-            if default_tnorm == "luk":
+            if tnorm == "luk":
                 self.tensor = 1 - predicate.tensor(domain)
 
         self.parameters = predicate.parameters + domain.parameters
@@ -177,26 +179,28 @@ class KnowledgeBase:
             self.tensor = tf.constant(1.0)
         else:
             clauses_value_tensor = tf.concat([cl.tensor for cl in clauses], 0)
-            if default_clauses_aggregator == "min":
+            if clauses_aggregator == "min":
                 print("clauses aggregator is min")
                 self.tensor = tf.reduce_min(clauses_value_tensor)
-            if default_clauses_aggregator == "mean":
+            if clauses_aggregator == "mean":
                 self.tensor = tf.reduce_mean(clauses_value_tensor)
-            if default_clauses_aggregator == "hmean":
+            if clauses_aggregator == "hmean":
                 self.tensor = tf.div(tf.to_float(tf.size(clauses_value_tensor)),
                                      tf.reduce_sum(tf.reciprocal(clauses_value_tensor), keep_dims=True))
-            if default_clauses_aggregator == "wmean":
+            if clauses_aggregator == "wmean":
                 weights_tensor = tf.constant([cl.weight for cl in clauses])
                 self.tensor = tf.div(tf.reduce_sum(tf.multiply(weights_tensor, clauses_value_tensor)),
                                      tf.reduce_sum(weights_tensor))
-        if default_positive_fact_penality != 0:
+            if clauses_aggregator == 'log-likelihood':
+                self.tensor = tf.reduce_mean(tf.log(clauses_value_tensor))
+        if positive_fact_penalty != 0:
             self.loss = smooth(self.parameters) + \
-                        tf.multiply(default_positive_fact_penality, self.penalize_positive_facts()) - \
+                        tf.multiply(positive_fact_penalty, self.penalize_positive_facts()) - \
                         PR(self.tensor)
         else:
             self.loss = smooth(self.parameters) - PR(self.tensor)
         self.save_path = save_path
-        self.train_op = train_op(self.loss, default_optimizer)
+        self.train_op = train_op(self.loss, optimizer)
         self.saver = tf.train.Saver()
 
     def penalize_positive_facts(self):

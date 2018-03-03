@@ -21,9 +21,10 @@ thresholds = np.arange(.00, 1.1, .05)
 models_dir = "models/"
 results_dir = "results"
 
-errors_percentage = np.array([0.0, 0.1, 0.2, 0.3, 0.4])
+# errors_percentage = np.array([0.0, 0.1, 0.2, 0.3, 0.4])
+# constraints_choice = ["KB_wc_nr_", "KB_nc_nr_"]
+errors_percentage = np.array([0.0])
 constraints_choice = ["KB_wc_nr_", "KB_nc_nr_"]
-
 paths_to_models = ["baseline"]
 labels_of_models = ["baseline"]
 
@@ -58,6 +59,10 @@ def partof_baseline_test(bb_pair_idx, wholes_of_part, threshold=0.7, with_partof
     return (pairs_of_test_data[bb_pair_idx][-2] >= max(threshold,
                                                        pairs_of_test_data[bb_pair_idx][-1])) and type_compatibility
 
+def auc(precision, recall):
+    idx_recall = np.argsort(recall)
+    return np.trapz(np.array(precision)[idx_recall], x=np.array(recall)[idx_recall])
+
 
 def plot_recovery_chart(thresholds, performance_w, performance_wo, performance_b, label):
     width = 0.03  # the width of the bars
@@ -82,13 +87,9 @@ def plot_prec_rec_curve(precisionW, recallW, precisionWO, recallWO, precisionB, 
         precisionB = [precisionB[0], precisionB[0]]
         label_baseline_legend = 'RBPOF'
 
-    idx_recallW = np.argsort(recallW)
-    idx_recallWO = np.argsort(recallWO)
-    idx_recallB = np.argsort(recallB)
-
-    aucW = np.trapz(np.array(precisionW)[idx_recallW], x=np.array(recallW)[idx_recallW])
-    aucWO = np.trapz(np.array(precisionWO)[idx_recallWO], x=np.array(recallWO)[idx_recallWO])
-    aucB = np.trapz(np.array(precisionB)[idx_recallB], x=np.array(recallB)[idx_recallB])
+    aucW = auc(precisionW, recallW)
+    aucWO = auc(precisionWO, recallWO)
+    aucB = auc(precisionB, recallB)
 
     plt.plot(recallW, precisionW, lw=3, color='blue', label='LTN_prior: AUC={0:0.3f}'.format(aucW))
     plt.plot(recallWO, precisionWO, lw=3, color='green', label='LTN_expl: AUC={0:0.3f}'.format(aucWO))
@@ -246,6 +247,15 @@ def adjust_prec(precision):
             prec[idx_prec] = precision[idx_prec - 1]
     return prec
 
+def stat(measures, model_name, index_type=None):
+    if index_type:
+        return [measures['prec'][model_name][th][0, index_type] for th in
+                thresholds], [measures['recall'][model_name][th][0, index_type] for th in
+                thresholds]
+    else:
+        return [measures['prec'][model_name][th][0, 0] for th in
+                      thresholds], [measures['recall'][model_name][th][0, 0] for th in
+                      thresholds]
 
 for error in errors_percentage:
     ap_types_w = []
@@ -258,46 +268,32 @@ for error in errors_percentage:
     rec_types_wo = []
     rec_types_b = []
 
-    precisionWO = [measure_per_pof["prec"][models_dir + "KB_nc_nr_" + str(error) + ".ckpt"][th][0, 0] for th in
-                   thresholds]
-    recallWO = [measure_per_pof["recall"][models_dir + "KB_nc_nr_" + str(error) + ".ckpt"][th][0, 0] for th in
-                thresholds]
-    precisionW = [measure_per_pof["prec"][models_dir + "KB_wc_nr_" + str(error) + ".ckpt"][th][0, 0] for th in
-                  thresholds]
-    recallW = [measure_per_pof["recall"][models_dir + "KB_wc_nr_" + str(error) + ".ckpt"][th][0, 0] for th in
-               thresholds]
-    recallB_pof = [measure_per_pof["recall"]["baseline"][th][0, 0] for th in thresholds]
-    precisionB_pof = [measure_per_pof["prec"]["baseline"][th][0, 0] for th in thresholds]
+    path_wc = models_dir + "KB_wc_nr_" + str(error) + ".ckpt"
+    path_nc = models_dir + "KB_nc_nr_" + str(error) + ".ckpt"
+
+    precisionW, recallW = stat(measure_per_pof, path_wc)
+    precisionWO, recallWO = stat(measure_per_pof, path_nc)
+    precisionB_pof, recallB_pof = stat(measure_per_pof, 'baseline')
 
     precisionW = adjust_prec(precisionW)
     precisionWO = adjust_prec(precisionWO)
     precisionB_pof = adjust_prec(precisionB_pof)
-    idx_recallW = np.argsort(recallW)
-    idx_recallWO = np.argsort(recallWO)
 
     plot_prec_rec_curve(precisionW, recallW, precisionWO, recallWO, precisionB_pof, recallB_pof,
                         str(int(error * 100)) + '_part-of')
 
-    ltn_performance_pof_w.append(np.trapz(np.array(precisionW)[idx_recallW], x=np.array(recallW)[idx_recallW]))
-    ltn_performance_pof_wo.append(np.trapz(np.array(precisionWO)[idx_recallWO], x=np.array(recallWO)[idx_recallWO]))
+    ltn_performance_pof_w.append(auc(precisionW, recallW))
+    ltn_performance_pof_wo.append(auc(precisionWO, recallWO))
     recallB = [0.0, recallB_pof[0]]
     precisionB = [precisionB_pof[0], precisionB_pof[0]]
-    ltn_performance_pof_b.append(np.trapz(np.array(precisionB), x=np.array(recallB)))
+    ltn_performance_pof_b.append(auc(precisionB, recallB))
 
     for t in selected_types:
         index_type = np.where(selected_types == t)[0][0]
 
-        precisionWO_types = [
-            measure_per_type["prec"][models_dir + "KB_nc_nr_" + str(error) + ".ckpt"][th][0, index_type] for th in
-            thresholds]
-        recallWO_types = [measure_per_type["recall"][models_dir + "KB_nc_nr_" + str(error) + ".ckpt"][th][0, index_type]
-                          for th in thresholds]
-        precisionW_types = [measure_per_type["prec"][models_dir + "KB_wc_nr_" + str(error) + ".ckpt"][th][0, index_type]
-                            for th in thresholds]
-        recallW_types = [measure_per_type["recall"][models_dir + "KB_wc_nr_" + str(error) + ".ckpt"][th][0, index_type]
-                         for th in thresholds]
-        precisionB_types = [measure_per_type["prec"]["baseline"][th][0, index_type] for th in thresholds]
-        recallB_types = [measure_per_type["recall"]["baseline"][th][0, index_type] for th in thresholds]
+        precisionW_types, recallW_types = stat(measure_per_type, path_wc, index_type)
+        precisionWO_types, recallWO_types = stat(measure_per_type, path_nc, index_type)
+        precisionB_types, recallB_types = stat(measure_per_type, 'baseline', index_type)
 
         prec_types_w.append(precisionW_types)
         prec_types_wo.append(precisionWO_types)
@@ -312,15 +308,9 @@ for error in errors_percentage:
         plot_prec_rec_curve(precisionW_types, recallW_types, precisionWO_types, recallWO_types, precisionB_types,
                             recallB_types, str(int(error * 100)) + "_" + t)
 
-        idx_recallW_types = np.argsort(recallW_types)
-        idx_recallWO_types = np.argsort(recallWO_types)
-        idx_recallB_types = np.argsort(recallB_types)
-        ap_types_w.append(
-            np.trapz(np.array(precisionW_types)[idx_recallW_types], x=np.array(recallW_types)[idx_recallW_types]))
-        ap_types_wo.append(
-            np.trapz(np.array(precisionWO_types)[idx_recallWO_types], x=np.array(recallWO_types)[idx_recallWO_types]))
-        ap_types_b.append(
-            np.trapz(np.array(precisionB_types)[idx_recallB_types], x=np.array(recallB_types)[idx_recallB_types]))
+        ap_types_w.append(auc(precisionW_types, recallW_types))
+        ap_types_wo.append(auc(precisionWO_types, recallWO_types))
+        ap_types_b.append(auc(precisionB_types, recallB_types))
 
     plot_prec_rec_curve(np.mean(prec_types_w, axis=0), np.mean(rec_types_w, axis=0),
                         np.mean(prec_types_wo, axis=0), np.mean(rec_types_wo, axis=0),

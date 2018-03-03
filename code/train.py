@@ -2,11 +2,10 @@ from pascalpart import *
 import tensorflow as tf
 import random, os, pdb
 import logictensornetworks as ltn
-
-ltn.default_optimizer = "rmsprop"
+import config
 
 # swith between GPU and CPU
-config = tf.ConfigProto(device_count={'GPU': 1})
+tf_config = tf.ConfigProto(device_count={'GPU': 1})
 
 number_of_positive_examples_x_types = 250
 number_of_negative_examples_x_types = 250
@@ -196,8 +195,8 @@ def train(number_of_training_iterations=2500,
     KB = ltn.KnowledgeBase(kb_label, clauses, "models/")
 
     # start training
-    init = tf.initialize_all_variables()
-    sess = tf.Session(config=config)
+    init = tf.global_variables_initializer()
+    sess = tf.Session(config=tf_config)
     if start_from_iter == 1:
         sess.run(init)
     if start_from_iter > 1:
@@ -226,6 +225,8 @@ def train(number_of_training_iterations=2500,
             sat_level = sess.run(KB.tensor, feed_dict)
             if np.isnan(sat_level):
                 train_kb = False
+            if sat_level < 0: # Using log-likelihood aggregation
+                sat_level = np.exp(sat_level)
             if sat_level >= saturation_limit:
                 KB.save(sess)
                 train_kb = False
@@ -292,15 +293,16 @@ def get_feed_dict(idxs_of_pos_ex_of_types,
             feed_dict[w0.tensor],
             feed_dict[p0.tensor],
             feed_dict[p0w0.tensor][:, -1:-3:-1]], axis=1)
-    print("feed dict size is as follows")
-    for k in feed_dict:
-        print(k.name, feed_dict[k].shape)
+    # print("feed dict size is as follows")
+    # for k in feed_dict:
+    #     print(k.name, feed_dict[k].shape)
     return feed_dict
 
-
-for nr in [0.0, 0.1, 0.2, 0.3, 0.4]:
-    for wc in [True, False]:
-        train(number_of_training_iterations=1000,
-              frequency_of_feed_dict_generation=100,
+# for nr in [0.0, 0.1, 0.2, 0.3, 0.4]:
+#     for wc in [True, False]:
+for nr in config.NOISE_VALUES:
+    for wc in config.WC_TRAIN:
+        train(number_of_training_iterations=config.MAX_TRAINING_ITERATIONS,
+              frequency_of_feed_dict_generation=config.FREQ_OF_FEED_DICT_GENERATION,
               with_constraints=wc, noise_ratio=nr,
-              saturation_limit=.95)
+              saturation_limit=config.SATURATION_LIMIT)
