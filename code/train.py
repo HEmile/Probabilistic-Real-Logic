@@ -7,10 +7,6 @@ import config
 # swith between GPU and CPU
 tf_config = tf.ConfigProto(device_count={'GPU': 1})
 
-number_of_positive_examples_x_types = 250
-number_of_negative_examples_x_types = 250
-number_of_positive_example_x_partof = 250
-number_of_negative_example_x_partof = 250
 number_of_pairs_for_axioms = 1000
 
 train_data, pairs_of_train_data, types_of_train_data, partOf_of_pairs_of_train_data, _, _ = get_data("train",
@@ -34,8 +30,8 @@ print("non empty types in train data", existing_types)
 print("finished uploading and analyzing data")
 print("Start model definition")
 
-# domain definition
-
+# Define the clauses in the knowledge base.
+# First we define the facts.
 clauses_for_positive_examples_of_types = \
     [ltn.Clause([ltn.Literal(True, isOfType[t], objects_of_type[t])], label="examples_of_" + t, weight=1.0) for t in
      existing_types]
@@ -52,7 +48,6 @@ clause_for_negative_examples_of_partOf = [ltn.Clause([ltn.Literal(False, isPartO
                                                      weight=1.0)]
 
 # defining axioms from the partOf ontology
-# def create_constraints():
 parts_of_whole, wholes_of_part = get_part_whole_ontology()
 
 w1 = {}
@@ -61,21 +56,21 @@ w2 = {}
 p2 = {}
 p1w1 = {}
 p2w2 = {}
-oo = ltn.Domain((number_of_features - 1) * 2 + 2, label="same_object_pairs")
-o = ltn.Domain(number_of_features - 1, label="a_generi_object")
+oo = ltn.Domain(number_of_features * 2 + 2, label="same_object_pairs")
+o = ltn.Domain(number_of_features, label="a_generi_object")
 
-w0 = ltn.Domain(number_of_features - 1, label="whole_of_part_whole_pair")
-p0 = ltn.Domain(number_of_features - 1, label="part_of_part_whole_pair")
-p0w0 = ltn.Domain((number_of_features - 1) * 2 + 2, label="part_whole_pair")
-w0p0 = ltn.Domain((number_of_features - 1) * 2 + 2, label="whole_part_pair")
+w0 = ltn.Domain(number_of_features, label="whole_of_part_whole_pair")
+p0 = ltn.Domain(number_of_features, label="part_of_part_whole_pair")
+p0w0 = ltn.Domain(number_of_features * 2 + 2, label="part_whole_pair")
+w0p0 = ltn.Domain(number_of_features * 2 + 2, label="whole_part_pair")
 
 for t in selected_types:
-    w1[t] = ltn.Domain(number_of_features - 1, label="whole_predicted_objects_for_" + t)
-    p1[t] = ltn.Domain(number_of_features - 1, label="part_predicted_objects_for_" + t)
-    w2[t] = ltn.Domain(number_of_features - 1, label="whole_predicted_objects_for_" + t)
-    p2[t] = ltn.Domain(number_of_features - 1, label="part_predicted_objects_for_" + t)
-    p1w1[t] = ltn.Domain((number_of_features - 1) * 2 + 2, label="potential_part_whole_object_pairs_for_" + t)
-    p2w2[t] = ltn.Domain((number_of_features - 1) * 2 + 2, label="potential_whole_part_object_pairs_for_" + t)
+    w1[t] = ltn.Domain(number_of_features, label="whole_predicted_objects_for_" + t)
+    p1[t] = ltn.Domain(number_of_features, label="part_predicted_objects_for_" + t)
+    w2[t] = ltn.Domain(number_of_features, label="whole_predicted_objects_for_" + t)
+    p2[t] = ltn.Domain(number_of_features, label="part_predicted_objects_for_" + t)
+    p1w1[t] = ltn.Domain(number_of_features * 2 + 2, label="potential_part_whole_object_pairs_for_" + t)
+    p2w2[t] = ltn.Domain(number_of_features * 2 + 2, label="potential_whole_part_object_pairs_for_" + t)
 
 partOf_is_antisymmetric = [ltn.Clause([ltn.Literal(False, isPartOf, p0w0), ltn.Literal(False, isPartOf, w0p0)],
                                       label="part_of_is_antisymmetric", weight=0.37)]
@@ -248,52 +243,51 @@ def get_feed_dict(idxs_of_pos_ex_of_types,
     for t in existing_types:
         feed_dict[objects_of_type[t].tensor] = \
             train_data[np.random.choice(idxs_of_pos_ex_of_types[t],
-                                        number_of_positive_examples_x_types)][:, 1:]
+                                        config.N_POS_EXAMPLES_TYPES)][:, 1:]
         feed_dict[objects_of_type_not[t].tensor] = \
             train_data[np.random.choice(idxs_of_neg_ex_of_types[t],
-                                        number_of_negative_examples_x_types)][:, 1:]
+                                        config.N_NEG_EXAMPLES_TYPES)][:, 1:]
 
     # positive and negative examples for partOF
     feed_dict[object_pairs_in_partOf.tensor] = \
         pairs_of_train_data[np.random.choice(idxs_of_pos_ex_of_partOf,
-                                             number_of_positive_example_x_partof)]
+                                             config.N_POS_EXAMPLES_PARTOF)]
 
     feed_dict[object_pairs_not_in_partOf.tensor] = \
         pairs_of_train_data[np.random.choice(idxs_of_neg_ex_of_partOf,
-                                             number_of_negative_example_x_partof)]
+                                             config.N_NEG_EXAMPLES_PARTOF)]
 
     # feed data for axioms
     tmp = pairs_data[np.random.choice(range(pairs_data.shape[0]), number_of_pairs_for_axioms)]
-    feed_dict[o.tensor] = tmp[:, :number_of_features - 1]
+    feed_dict[o.tensor] = tmp[:, :number_of_features]
+
+    # TODO: Why can the domains p1w1 and p2w2 (and w1, w2 and p1, p2) not be shared?
 
     if with_constraints:
         for t in selected_types:
             feed_dict[p1w1[t].tensor] = tmp
-            feed_dict[w1[t].tensor] = \
-                feed_dict[p1w1[t].tensor][:, number_of_features - 1:2 * (number_of_features - 1)]
-            feed_dict[p1[t].tensor] = \
-                feed_dict[p1w1[t].tensor][:, 0:number_of_features - 1]
-            feed_dict[p2w2[t].tensor] = tmp
-            feed_dict[w2[t].tensor] = \
-                feed_dict[p2w2[t].tensor][:, number_of_features - 1:2 * (number_of_features - 1)]
-            feed_dict[p2[t].tensor] = \
-                feed_dict[p2w2[t].tensor][:, :number_of_features - 1]
+            feed_dict[w1[t].tensor] = feed_dict[p1w1[t].tensor][:, number_of_features:2 * number_of_features]
+            feed_dict[p1[t].tensor] = feed_dict[p1w1[t].tensor][:, :number_of_features]
 
-        feed_dict[oo.tensor] = np.concatenate([tmp[:, :number_of_features - 1],
-                                               tmp[:, :number_of_features - 1],
+            feed_dict[p2w2[t].tensor] = tmp
+            feed_dict[w2[t].tensor] = feed_dict[p2w2[t].tensor][:, number_of_features:2 * number_of_features]
+            feed_dict[p2[t].tensor] = feed_dict[p2w2[t].tensor][:, :number_of_features]
+
+        feed_dict[oo.tensor] = np.concatenate([tmp[:, :number_of_features],
+                                               tmp[:, :number_of_features],
                                                np.ones((tmp.shape[0], 2), dtype=float)], axis=1)
         feed_dict[p0w0.tensor] = tmp
         feed_dict[w0.tensor] = \
-            feed_dict[p0w0.tensor][:, number_of_features - 1:2 * (number_of_features - 1)]
+            feed_dict[p0w0.tensor][:, number_of_features:2 * number_of_features]
         feed_dict[p0.tensor] = \
-            feed_dict[p0w0.tensor][:, :number_of_features - 1]
+            feed_dict[p0w0.tensor][:, :number_of_features]
         feed_dict[w0p0.tensor] = np.concatenate([
             feed_dict[w0.tensor],
             feed_dict[p0.tensor],
             feed_dict[p0w0.tensor][:, -1:-3:-1]], axis=1)
-    # print("feed dict size is as follows")
-    # for k in feed_dict:
-    #     print(k.name, feed_dict[k].shape)
+    print("feed dict size is as follows")
+    for k in feed_dict:
+        print(k.name, feed_dict[k].shape)
     return feed_dict
 
 for nr in config.NOISE_VALUES:

@@ -8,7 +8,7 @@ import config
 data_training_dir = "data/training/"
 data_testing_dir = "data/testing/"
 zero_distance_threshold = 6
-number_of_features = 65
+number_of_features = 64
 
 types = np.genfromtxt("data/classes.csv", dtype='U', delimiter=",")
 
@@ -22,25 +22,31 @@ if config.DATASET == 'animal':
 if config.DATASET == 'all':
     selected_types = types[1:]
 
-objects = ltn.Domain(number_of_features - 1, label="a_bounding_box")
+# Domain containing the objects
+objects = ltn.Domain(number_of_features, label="a_bounding_box")
 
-pairs_of_objects = ltn.Domain(2 * (number_of_features - 1) + 2, label="a_pair_of_bounding_boxes")
+# Domain containing pairs of objects. They get two additional overlap features.
+pairs_of_objects = ltn.Domain(2 * number_of_features + 2, label="a_pair_of_bounding_boxes")
 
+# Create type predicates acting on the objects domain
 isOfType = {}
 for t in selected_types:
     isOfType[t] = ltn.Predicate("is_of_type_" + t, objects, config.TYPE_LAYERS)
+
+# Create partOf predicate acting on the pairs of objects domain
 isPartOf = ltn.Predicate("is_part_of", pairs_of_objects, config.PART_OF_LAYERS)
 
-# Create domains for each object type
+# Create domains for each object type, both inclusive and exclusive
+# TODO: Figure out why this is necessary
 objects_of_type = {}
 objects_of_type_not = {}
 for t in selected_types:
-    objects_of_type[t] = ltn.Domain(number_of_features - 1, label="objects_of_type_" + t)
-    objects_of_type_not[t] = ltn.Domain(number_of_features - 1, label="objects_of_type_not_" + t)
+    objects_of_type[t] = ltn.Domain(number_of_features, label="objects_of_type_" + t)
+    objects_of_type_not[t] = ltn.Domain(number_of_features, label="objects_of_type_not_" + t)
 
-object_pairs_in_partOf = ltn.Domain((number_of_features - 1) * 2 + 2,
+object_pairs_in_partOf = ltn.Domain(number_of_features * 2 + 2,
                                     label="object_pairs_in_partof_relation")
-object_pairs_not_in_partOf = ltn.Domain((number_of_features - 1) * 2 + 2,
+object_pairs_not_in_partOf = ltn.Domain(number_of_features * 2 + 2,
                                         label="object_pairs_not_in_partof_relation")
 
 
@@ -65,8 +71,6 @@ def get_data(train_or_test_swritch, max_rows=10000000):
     data = np.genfromtxt(data_dir + "features.csv", delimiter=",", max_rows=max_rows)
     types_of_data = types[np.genfromtxt(data_dir + "types.csv", dtype="i", max_rows=max_rows)]
     idx_whole_for_data = np.genfromtxt(data_dir + "partOf.csv", dtype="i", max_rows=max_rows)
-    test1 = np.all(data[:, -2:] - data[:, -4:-2] >= zero_distance_threshold, axis=1)
-    test2 = np.in1d(types_of_data, selected_types)
     idx_of_cleaned_data = np.where(np.logical_and(
         np.all(data[:, -2:] - data[:, -4:-2] >= zero_distance_threshold, axis=1),
         np.in1d(types_of_data, selected_types)))[0]

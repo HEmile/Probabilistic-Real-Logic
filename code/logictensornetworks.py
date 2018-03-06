@@ -18,7 +18,6 @@ def train_op(loss, optimization_algorithm):
 
 
 def PR(tensor):
-    global count
     np.set_printoptions(threshold=np.nan)
     return tf.Print(tensor, [tf.shape(tensor), tensor.name, tensor], summarize=200000)
 
@@ -35,7 +34,11 @@ def disjunction_of_literals(literals, label="no_label"):
     if config.TNORM == "goedel":
         result = tf.reduce_max(literals_tensor, 1, keep_dims=True, name=label)
     if config.FORALL_AGGREGATOR == "product":
-        return tf.reduce_prod(result, keep_dims=True)
+        if config.CLAUSE_AGGREGATOR == 'log-likelihood':
+            return tf.reduce_mean(tf.log(literals_tensor), keep_dims=True, name=label)
+        else:
+            return tf.exp(tf.reduce_mean(tf.log(literals_tensor), keep_dims=True), name=label)
+        # return tf.reduce_prod(result, keep_dims=True)
     if config.FORALL_AGGREGATOR == "mean":
         return tf.reduce_mean(result, keep_dims=True, name=label)
     if config.FORALL_AGGREGATOR == "gmean":
@@ -54,7 +57,9 @@ def smooth(parameters):
 
 
 # Domain defines a term-space. The domain is a subset of vectors in real^self.columns.
-# self.tensor
+# self.tensor is assigned with a feed dict to actually instantiate the domain with objects.
+# The size of the domain is not specified beforehand: You can feed any number of objects.
+# Other parts of the code refer to Domains to iterate over those objects.
 class Domain:
     # columns are a number: The amount of features used.
     def __init__(self, columns, dom_type="float", label=None):
@@ -79,7 +84,8 @@ class Domain_slice(Domain):
         self.tensor = tf.concat(tf.split(1, domain.columns, domain.tensor)[begin_column:end_column], 1)
         self.parameters = domain.parameters
 
-
+# I think this is used for function symbols. It is not used
+# anywhere in the code base.
 class Function(Domain):
     def __init__(self, label, domain, range, value=None):
         self.label = label
@@ -120,6 +126,9 @@ class Predicate:
                              name="u" + label)
         self.parameters = [self.W, self.V, self.b, self.u]
 
+    # Here is where the logic tensor network magic happens. It creates a tensor
+    # that takes as input the domain of the predicate and computes the value of
+    # the predicate for all elements in the domain.
     def tensor(self, domain=None):
         if domain is None:
             domain = self.domain
@@ -135,14 +144,12 @@ class Literal:
     def __init__(self, polarity, predicate, domain=None):
         self.predicate = predicate
         self.polarity = polarity
+        self.domain = domain
         if domain is None:
             self.domain = predicate.domain
-        else:
-            self.domain = domain
         if polarity:
             self.tensor = predicate.tensor(domain)
         else:
-            #TODO: I changed some stuff with the product norm here. Not sure if it's correct.
             if config.TNORM == "goedel":
                 y = tf.equal(predicate.tensor(domain), 0.0)
                 self.tensor = tf.cast(y, tf.float32)
@@ -152,6 +159,8 @@ class Literal:
         self.parameters = predicate.parameters + domain.parameters
 
 
+# Clauses are a disjunction of literals. Other forms of clauses are currently
+# not accepted.
 class Clause:
     def __init__(self, literals, label=None, weight=1.0):
         self.weight = weight
@@ -167,7 +176,8 @@ class KnowledgeBase:
         print("defining the knowledge base", label)
         self.label = label
         self.clauses = clauses
-        self.parameters = [par for cl in self.clauses for par in cl.parameters]
+        self.parameters = [par for cl in self.clauses
+                           for par in cl.parameters]
         if not self.clauses:
             self.tensor = tf.constant(1.0)
         else:
@@ -185,7 +195,11 @@ class KnowledgeBase:
                 self.tensor = tf.div(tf.reduce_sum(tf.multiply(weights_tensor, clauses_value_tensor)),
                                      tf.reduce_sum(weights_tensor))
             if config.CLAUSE_AGGREGATOR == 'log-likelihood':
-                self.tensor = tf.reduce_mean(tf.log(clauses_value_tensor))
+                # Smartly handle exp/log functions as it already uses exp sum log trick to compute product norm.
+                if config.FORALL_AGGREGATOR == 'product':
+                    self.tensor = tf.reduce_mean(clauses_value_tensor)
+                else:
+                    self.tensor = tf.reduce_mean(tf.log(clauses_value_tensor))
         if config.POSITIVE_FACT_PENALTY != 0:
             self.loss = smooth(self.parameters) + \
                         tf.multiply(config.POSITIVE_FACT_PENALTY, self.penalize_positive_facts()) - \
@@ -210,7 +224,7 @@ class KnowledgeBase:
             print("restoring model")
             self.saver.restore(sess, ckpt.model_checkpoint_path)
 
-    def train(self, sess, feed_dict={}):
+    def train(self, sess, feed_dict):
         return sess.run(self.train_op, feed_dict)
 
     def is_nan(self, sess, feed_dict={}):

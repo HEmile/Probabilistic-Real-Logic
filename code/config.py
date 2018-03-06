@@ -7,6 +7,12 @@ SATURATION_LIMIT = 0.95
 
 NOISE_VALUES = [0.]
 
+N_POS_EXAMPLES_TYPES = 250
+N_NEG_EXAMPLES_TYPES = 250
+N_POS_EXAMPLES_PARTOF = 250
+N_NEG_EXAMPLES_PARTOF = 250
+number_of_pairs_for_axioms = 1000
+
 # Options: 'all', 'indoor', 'vehicle', 'animal'
 DATASET = 'indoor'
 
