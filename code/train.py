@@ -118,8 +118,7 @@ def add_noise_to_data(noise_ratio):
                                                         p=np.array([freq_other[type_of_idx][t1] \
                                                                     for t1 in not_types_of_idx]))
 
-        noisy_data_pairs_idxs = np.append(np.random.choice(np.where(partOf_of_pairs_of_train_data)[0],
-                                                           int(
+        noisy_data_pairs_idxs = np.append(np.random.choice(np.where(partOf_of_pairs_of_train_data)[0], int(
                                                                partOf_of_pairs_of_train_data.sum() * noise_ratio * 0.5)),
                                           np.random.choice(np.where(np.logical_not(partOf_of_pairs_of_train_data))[0],
                                                            int(
@@ -150,17 +149,14 @@ def add_noise_to_data(noise_ratio):
     print("wrong negative partof", len(np.setdiff1d(idxs_of_noisy_negative_examples_of_partOf,
                                               idxs_of_negative_examples_of_partOf)))
 
-    return idxs_of_noisy_positive_examples_of_types, \
-           idxs_of_noisy_negative_examples_of_types, \
-           idxs_of_noisy_positive_examples_of_partOf, \
-           idxs_of_noisy_negative_examples_of_partOf,
+    return idxs_of_noisy_positive_examples_of_types, idxs_of_noisy_negative_examples_of_types, \
+           idxs_of_noisy_positive_examples_of_partOf, idxs_of_noisy_negative_examples_of_partOf
 
 
-def train(number_of_training_iterations=2500,
-          frequency_of_feed_dict_generation=250,
-          with_constraints=False,
+def train(frequency_of_feed_dict_generation=250,
+          alg='nc',
           noise_ratio=0.0,
-          start_from_iter=1,
+          start_from_iter=0,
           saturation_limit=0.90):
     # add noise to train data
     idxs_of_noisy_positive_examples_of_types, \
@@ -168,54 +164,84 @@ def train(number_of_training_iterations=2500,
     idxs_of_noisy_positive_examples_of_partOf, \
     idxs_of_noisy_negative_examples_of_partOf = add_noise_to_data(noise_ratio)
 
+    use_constraints = alg != 'nc'
+
     # defining the clauses of the background knowledge
-    clauses = clauses_for_positive_examples_of_types + \
+    facts = clauses_for_positive_examples_of_types + \
               clauses_for_negative_examples_of_types + \
               clause_for_positive_examples_of_partOf + \
               clause_for_negative_examples_of_partOf
 
-    if with_constraints:
-        clauses += partof_is_irreflexive + partOf_is_antisymmetric + clauses_for_wholes_of_parts + \
-            clauses_for_parts_of_wholes + clauses_for_disjoint_types + clause_for_at_least_one_type
+    rules = partof_is_irreflexive + partOf_is_antisymmetric + clauses_for_wholes_of_parts + \
+        clauses_for_parts_of_wholes + clauses_for_disjoint_types + clause_for_at_least_one_type
 
     # defining the label of the background knowledge
-    if with_constraints:
-        kb_label = "KB_wc_nr_" + str(noise_ratio)
-    else:
-        kb_label = "KB_nc_nr_" + str(noise_ratio)
+    kb_label = "KB_" + alg + "_nr_" + str(noise_ratio)
 
-    # definint the KB
-    KB = ltn.KnowledgeBase(kb_label, clauses, "models/")
+    prior_mean = []
+    prior_lambda = config.REGULARIZATION
+    if alg == 'prior':
+        # defining the KB. Only train using rules.
+        KB = ltn.KnowledgeBase(kb_label, rules, "models/")
+
+        # start training
+        init = tf.global_variables_initializer()
+        with tf.Session(config=tf_config) as sess:
+            sess.run(init)
+            prior_mean = np.zeros(sess.run(KB.num_params, {}))
+
+            train_kb = True
+            for i in range(config.MAX_PRIOR_TRAINING_IT):
+                if i % frequency_of_feed_dict_generation == 0:
+                    if train_kb:
+                        KB.save(sess)
+                    else:
+                        train_kb = True
+                    feed_dict = get_feed_dict(idxs_of_noisy_positive_examples_of_types, idxs_of_noisy_negative_examples_of_types,
+                                              idxs_of_noisy_positive_examples_of_partOf, idxs_of_noisy_negative_examples_of_partOf,
+                                              pairs_of_train_data, with_facts=False)
+                    feed_dict[KB.prior_mean] = prior_mean
+                    feed_dict[KB.prior_lambda] = prior_lambda
+                if train_kb:
+                    sat_level = KB.train(sess, feed_dict)
+                    if np.isnan(sat_level):
+                        train_kb = False
+                    if sat_level < 0:  # Using log-likelihood aggregation
+                        sat_level = np.exp(sat_level)
+                    if sat_level >= saturation_limit:
+                        # Create the parameters for the prior
+                        prior_mean = sess.run(KB.omega, feed_dict)
+                        prior_lambda = config.LAMBDA_2
+                        train_kb = False
+                print(str(i) + ' --> ' + str(sat_level))
+
+    if alg == 'wc':
+        KB = ltn.KnowledgeBase(kb_label, facts + rules, "models/")
+    else:
+        KB = ltn.KnowledgeBase(kb_label, facts, "models/")
 
     # start training
     init = tf.global_variables_initializer()
     sess = tf.Session(config=tf_config)
-    if start_from_iter == 1:
-        sess.run(init)
-    if start_from_iter > 1:
-        KB.restore(sess)
+    sess.run(init)
+    if len(prior_mean) == 0:
+        prior_mean = np.zeros(sess.run(KB.num_params, {}))
 
-    feed_dict = get_feed_dict(idxs_of_noisy_positive_examples_of_types,
-                              idxs_of_noisy_negative_examples_of_types,
-                              idxs_of_noisy_positive_examples_of_partOf,
-                              idxs_of_noisy_negative_examples_of_partOf,
-                              pairs_of_train_data,
-                              with_constraints=with_constraints)
     train_kb = True
-    for i in range(start_from_iter, number_of_training_iterations + 1):
+    for i in range(config.MAX_TRAINING_ITERATIONS):
         if i % frequency_of_feed_dict_generation == 0:
             if train_kb:
                 KB.save(sess)
             else:
                 train_kb = True
-            feed_dict = get_feed_dict(idxs_of_noisy_positive_examples_of_types,
-                                      idxs_of_noisy_negative_examples_of_types,
-                                      idxs_of_noisy_positive_examples_of_partOf,
-                                      idxs_of_noisy_negative_examples_of_partOf,
-                                      pairs_of_train_data,
-                                      with_constraints=with_constraints)
+            feed_dict = get_feed_dict(idxs_of_noisy_positive_examples_of_types, idxs_of_noisy_negative_examples_of_types,
+                                      idxs_of_noisy_positive_examples_of_partOf, idxs_of_noisy_negative_examples_of_partOf,
+                                      pairs_of_train_data, with_constraints=alg == 'wc')
+            feed_dict[KB.prior_mean] = prior_mean
+            feed_dict[KB.prior_lambda] = prior_lambda
         if train_kb:
-            sat_level = sess.run(KB.tensor, feed_dict)
+            # TODO: Doesn't this run the whole code twice????????
+            sat_level = KB.train(sess, feed_dict)
             if np.isnan(sat_level):
                 train_kb = False
             if sat_level < 0: # Using log-likelihood aggregation
@@ -223,76 +249,62 @@ def train(number_of_training_iterations=2500,
             if sat_level >= saturation_limit:
                 KB.save(sess)
                 train_kb = False
-            else:
-                KB.train(sess, feed_dict)
+
         print(str(i) + ' --> ' + str(sat_level))
     print("end of training")
     sess.close()
 
 
-def get_feed_dict(idxs_of_pos_ex_of_types,
-                  idxs_of_neg_ex_of_types,
-                  idxs_of_pos_ex_of_partOf,
-                  idxs_of_neg_ex_of_partOf,
-                  pairs_data,
-                  with_constraints=True):
+def get_feed_dict(idxs_of_pos_ex_of_types, idxs_of_neg_ex_of_types,
+                  idxs_of_pos_ex_of_partOf, idxs_of_neg_ex_of_partOf,
+                  pairs_data, with_constraints=True, with_facts=True):
     print("selecting new training data")
     feed_dict = {}
 
-    # positive and negative examples for types
-    for t in existing_types:
-        feed_dict[objects_of_type[t].tensor] = \
-            train_data[np.random.choice(idxs_of_pos_ex_of_types[t],
-                                        config.N_POS_EXAMPLES_TYPES)][:, 1:]
-        feed_dict[objects_of_type_not[t].tensor] = \
-            train_data[np.random.choice(idxs_of_neg_ex_of_types[t],
-                                        config.N_NEG_EXAMPLES_TYPES)][:, 1:]
+    if with_facts:
+        # positive and negative examples for types
+        for t in existing_types:
+            feed_dict[objects_of_type[t].tensor] = \
+                train_data[np.random.choice(idxs_of_pos_ex_of_types[t], config.N_POS_EXAMPLES_TYPES)][:, 1:]
+            feed_dict[objects_of_type_not[t].tensor] = \
+                train_data[np.random.choice(idxs_of_neg_ex_of_types[t], config.N_NEG_EXAMPLES_TYPES)][:, 1:]
 
-    # positive and negative examples for partOF
-    feed_dict[object_pairs_in_partOf.tensor] = \
-        pairs_of_train_data[np.random.choice(idxs_of_pos_ex_of_partOf,
-                                             config.N_POS_EXAMPLES_PARTOF)]
+        # positive and negative examples for partOF
+        feed_dict[object_pairs_in_partOf.tensor] = \
+            pairs_of_train_data[np.random.choice(idxs_of_pos_ex_of_partOf, config.N_POS_EXAMPLES_PARTOF)]
 
-    feed_dict[object_pairs_not_in_partOf.tensor] = \
-        pairs_of_train_data[np.random.choice(idxs_of_neg_ex_of_partOf,
-                                             config.N_NEG_EXAMPLES_PARTOF)]
+        feed_dict[object_pairs_not_in_partOf.tensor] = \
+            pairs_of_train_data[np.random.choice(idxs_of_neg_ex_of_partOf, config.N_NEG_EXAMPLES_PARTOF)]
 
     # feed data for axioms
     tmp = pairs_data[np.random.choice(range(pairs_data.shape[0]), number_of_pairs_for_axioms)]
     feed_dict[o.tensor] = tmp[:, :number_of_features]
 
-    # TODO: Why can the domains p1w1 and p2w2 (and w1, w2 and p1, p2) not be shared?
-
     if with_constraints:
         for t in selected_types:
             feed_dict[p1w1[t].tensor] = tmp
-            feed_dict[w1[t].tensor] = feed_dict[p1w1[t].tensor][:, number_of_features:2 * number_of_features]
-            feed_dict[p1[t].tensor] = feed_dict[p1w1[t].tensor][:, :number_of_features]
+            feed_dict[w1[t].tensor]   = feed_dict[p1w1[t].tensor][:, number_of_features:2 * number_of_features]
+            feed_dict[p1[t].tensor]   = feed_dict[p1w1[t].tensor][:, :number_of_features]
 
             feed_dict[p2w2[t].tensor] = tmp
-            feed_dict[w2[t].tensor] = feed_dict[p2w2[t].tensor][:, number_of_features:2 * number_of_features]
-            feed_dict[p2[t].tensor] = feed_dict[p2w2[t].tensor][:, :number_of_features]
+            feed_dict[w2[t].tensor]   = feed_dict[p2w2[t].tensor][:, number_of_features:2 * number_of_features]
+            feed_dict[p2[t].tensor]   = feed_dict[p2w2[t].tensor][:, :number_of_features]
 
-        feed_dict[oo.tensor] = np.concatenate([tmp[:, :number_of_features],
-                                               tmp[:, :number_of_features],
+        feed_dict[oo.tensor] = np.concatenate([tmp[:, :number_of_features], tmp[:, :number_of_features],
                                                np.ones((tmp.shape[0], 2), dtype=float)], axis=1)
         feed_dict[p0w0.tensor] = tmp
-        feed_dict[w0.tensor] = \
-            feed_dict[p0w0.tensor][:, number_of_features:2 * number_of_features]
-        feed_dict[p0.tensor] = \
-            feed_dict[p0w0.tensor][:, :number_of_features]
+        feed_dict[w0.tensor]   = feed_dict[p0w0.tensor][:, number_of_features:2 * number_of_features]
+        feed_dict[p0.tensor]   = feed_dict[p0w0.tensor][:, :number_of_features]
         feed_dict[w0p0.tensor] = np.concatenate([
-            feed_dict[w0.tensor],
-            feed_dict[p0.tensor],
-            feed_dict[p0w0.tensor][:, -1:-3:-1]], axis=1)
-    print("feed dict size is as follows")
-    for k in feed_dict:
-        print(k.name, feed_dict[k].shape)
+            feed_dict[w0.tensor], feed_dict[p0.tensor], feed_dict[p0w0.tensor][:, -1:-3:-1]], axis=1)
+    # print("feed dict size is as follows")
+    # for k in feed_dict:
+    #     print(k.name, feed_dict[k].shape)
     return feed_dict
 
+
 for nr in config.NOISE_VALUES:
-    for wc in config.WC_TRAIN:
-        train(number_of_training_iterations=config.MAX_TRAINING_ITERATIONS,
-              frequency_of_feed_dict_generation=config.FREQ_OF_FEED_DICT_GENERATION,
-              with_constraints=wc, noise_ratio=nr,
+    for alg in config.ALGORITHMS:
+        train(frequency_of_feed_dict_generation=config.FREQ_OF_FEED_DICT_GENERATION,
+              alg=alg, noise_ratio=nr,
               saturation_limit=config.SATURATION_LIMIT)

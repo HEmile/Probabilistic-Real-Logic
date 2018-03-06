@@ -50,11 +50,6 @@ def disjunction_of_literals(literals, label="no_label"):
         return tf.reduce_min(result, keep_dims=True, name=label)
 
 
-def smooth(parameters):
-    norm_of_omega = tf.reduce_sum(tf.expand_dims(tf.concat([tf.expand_dims(tf.reduce_sum(tf.square(par)), 0) for par in
-                                                            parameters], 0), 1))
-    return config.REGULARIZATION * norm_of_omega
-
 
 # Domain defines a term-space. The domain is a subset of vectors in real^self.columns.
 # self.tensor is assigned with a feed dict to actually instantiate the domain with objects.
@@ -200,12 +195,20 @@ class KnowledgeBase:
                     self.tensor = tf.reduce_mean(clauses_value_tensor)
                 else:
                     self.tensor = tf.reduce_mean(tf.log(clauses_value_tensor))
+
+        self.omega = tf.concat([tf.reshape(par, [-1]) for par in self.parameters], 0)
+        self.omega = tf.reshape(self.omega, [-1])  # Completely flatten the parameter array
+        self.num_params = tf.shape(self.omega)
+        self.prior_mean = tf.placeholder("float", shape=[None,], name="prior_mean")
+        self.prior_lambda = tf.placeholder("float", shape=(), name='prior_lambda')
+        L2_regular = tf.reduce_sum(tf.square(self.omega - self.prior_mean)) * self.prior_lambda
+
         if config.POSITIVE_FACT_PENALTY != 0:
-            self.loss = smooth(self.parameters) + \
+            self.loss = L2_regular + \
                         tf.multiply(config.POSITIVE_FACT_PENALTY, self.penalize_positive_facts()) - \
                         PR(self.tensor)
         else:
-            self.loss = smooth(self.parameters) - PR(self.tensor)
+            self.loss = L2_regular - self.tensor#PR(self.tensor)
         self.save_path = save_path
         self.train_op = train_op(self.loss, config.OPTIMIZER)
         self.saver = tf.train.Saver()
@@ -225,7 +228,8 @@ class KnowledgeBase:
             self.saver.restore(sess, ckpt.model_checkpoint_path)
 
     def train(self, sess, feed_dict):
-        return sess.run(self.train_op, feed_dict)
+        o, l = sess.run([self.train_op, self.loss], feed_dict)
+        return l
 
     def is_nan(self, sess, feed_dict={}):
         return sess.run(tf.is_nan(self.tensor), feed_dict)

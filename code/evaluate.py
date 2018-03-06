@@ -27,10 +27,8 @@ results_dir = "results"
 errors_percentage = np.array(config.NOISE_VALUES)
 
 constraints_choice = []
-if True in config.WC_TRAIN:
-    constraints_choice.append("KB_wc_nr_")
-if False in config.WC_TRAIN:
-    constraints_choice.append("KB_nc_nr_")
+for alg in config.ALGORITHMS:
+    constraints_choice.append("KB_" + alg + "_nr_")
 paths_to_models = ["baseline"]
 labels_of_models = ["baseline"]
 

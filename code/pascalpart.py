@@ -37,7 +37,6 @@ for t in selected_types:
 isPartOf = ltn.Predicate("is_part_of", pairs_of_objects, config.PART_OF_LAYERS)
 
 # Create domains for each object type, both inclusive and exclusive
-# TODO: Figure out why this is necessary
 objects_of_type = {}
 objects_of_type_not = {}
 for t in selected_types:
