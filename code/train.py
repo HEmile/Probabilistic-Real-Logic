@@ -178,11 +178,14 @@ def train(frequency_of_feed_dict_generation=250,
     # defining the label of the background knowledge
     kb_label = "KB_" + alg + "_nr_" + str(noise_ratio)
 
+    # Lists all predicates
+    predicates = list(isOfType.values()) + [isPartOf]
+
     prior_mean = []
     prior_lambda = config.REGULARIZATION
     if alg == 'prior':
         # defining the KB. Only train using rules.
-        KB = ltn.KnowledgeBase(kb_label, rules, "models/")
+        KB = ltn.KnowledgeBase(kb_label, predicates, rules, "models/")
 
         # start training
         init = tf.global_variables_initializer()
@@ -203,22 +206,22 @@ def train(frequency_of_feed_dict_generation=250,
                     feed_dict[KB.prior_mean] = prior_mean
                     feed_dict[KB.prior_lambda] = prior_lambda
                 if train_kb:
-                    sat_level = KB.train(sess, feed_dict)
+                    sat_level, normal_loss, reg_loss = KB.train(sess, feed_dict)
                     if np.isnan(sat_level):
                         train_kb = False
-                    if sat_level < 0:  # Using log-likelihood aggregation
-                        sat_level = np.exp(sat_level)
+                    if normal_loss < 0:  # Using log-likelihood aggregation
+                        sat_level = np.exp(-sat_level)
                     if sat_level >= saturation_limit:
-                        # Create the parameters for the prior
-                        prior_mean = sess.run(KB.omega, feed_dict)
-                        prior_lambda = config.LAMBDA_2
                         train_kb = False
-                print(str(i) + ' --> ' + str(sat_level))
+                    print(str(i) + ' --> ' + str(sat_level), normal_loss, reg_loss)
+            # Create the parameters for the prior
+            prior_mean = sess.run(KB.omega, feed_dict)
+            prior_lambda = config.LAMBDA_2
 
     if alg == 'wc':
-        KB = ltn.KnowledgeBase(kb_label, facts + rules, "models/")
+        KB = ltn.KnowledgeBase(kb_label, predicates, facts + rules, "models/")
     else:
-        KB = ltn.KnowledgeBase(kb_label, facts, "models/")
+        KB = ltn.KnowledgeBase(kb_label, predicates, facts, "models/")
 
     # start training
     init = tf.global_variables_initializer()
@@ -241,16 +244,16 @@ def train(frequency_of_feed_dict_generation=250,
             feed_dict[KB.prior_lambda] = prior_lambda
         if train_kb:
             # TODO: Doesn't this run the whole code twice????????
-            sat_level = KB.train(sess, feed_dict)
+            sat_level, normal_loss, reg_loss = KB.train(sess, feed_dict)
             if np.isnan(sat_level):
                 train_kb = False
-            if sat_level < 0: # Using log-likelihood aggregation
-                sat_level = np.exp(sat_level)
+            if normal_loss < 0: # Using log-likelihood aggregation
+                sat_level = np.exp(-sat_level)
             if sat_level >= saturation_limit:
                 KB.save(sess)
                 train_kb = False
 
-        print(str(i) + ' --> ' + str(sat_level))
+        print(str(i) + ' --> ' + str(sat_level), normal_loss, reg_loss)
     print("end of training")
     sess.close()
 

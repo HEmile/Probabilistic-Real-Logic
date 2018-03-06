@@ -272,8 +272,8 @@ for error in errors_percentage:
     rec_types_wo = []
     rec_types_b = []
 
-    path_wc = models_dir + "KB_wc_nr_" + str(error) + ".ckpt"
-    path_nc = models_dir + "KB_nc_nr_" + str(error) + ".ckpt"
+    path_wc = models_dir + "KB_prior_nr_" + str(error) + ".ckpt"
+    path_nc = models_dir + "KB_wc_nr_" + str(error) + ".ckpt"
 
     precisionW, recallW = stat(measure_per_pof, path_wc)
     precisionWO, recallWO = stat(measure_per_pof, path_nc)

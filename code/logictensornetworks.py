@@ -151,9 +151,6 @@ class Literal:
             else:
                 self.tensor = 1 - predicate.tensor(domain)
 
-        self.parameters = predicate.parameters + domain.parameters
-
-
 # Clauses are a disjunction of literals. Other forms of clauses are currently
 # not accepted.
 class Clause:
@@ -163,16 +160,14 @@ class Clause:
         self.literals = literals
         self.tensor = disjunction_of_literals(self.literals, label=label)
         self.predicates = set([lit.predicate for lit in self.literals])
-        self.parameters = [par for lit in literals for par in lit.parameters]
 
 
 class KnowledgeBase:
-    def __init__(self, label, clauses, save_path=""):
+    # Note: This does not currently support functions
+    def __init__(self, label, predicates, clauses, save_path=""):
         print("defining the knowledge base", label)
         self.label = label
         self.clauses = clauses
-        self.parameters = [par for cl in self.clauses
-                           for par in cl.parameters]
         if not self.clauses:
             self.tensor = tf.constant(1.0)
         else:
@@ -196,19 +191,22 @@ class KnowledgeBase:
                 else:
                     self.tensor = tf.reduce_mean(tf.log(clauses_value_tensor))
 
+        self.parameters = [param
+                           for pred in predicates
+                           for param in pred.parameters]
         self.omega = tf.concat([tf.reshape(par, [-1]) for par in self.parameters], 0)
         self.omega = tf.reshape(self.omega, [-1])  # Completely flatten the parameter array
         self.num_params = tf.shape(self.omega)
         self.prior_mean = tf.placeholder("float", shape=[None,], name="prior_mean")
         self.prior_lambda = tf.placeholder("float", shape=(), name='prior_lambda')
-        L2_regular = tf.reduce_sum(tf.square(self.omega - self.prior_mean)) * self.prior_lambda
+        self.L2_regular = tf.reduce_sum(tf.square(self.omega - self.prior_mean)) * self.prior_lambda
 
         if config.POSITIVE_FACT_PENALTY != 0:
-            self.loss = L2_regular + \
+            self.loss = self.L2_regular + \
                         tf.multiply(config.POSITIVE_FACT_PENALTY, self.penalize_positive_facts()) - \
                         PR(self.tensor)
         else:
-            self.loss = L2_regular - self.tensor#PR(self.tensor)
+            self.loss = self.L2_regular - self.tensor#PR(self.tensor)
         self.save_path = save_path
         self.train_op = train_op(self.loss, config.OPTIMIZER)
         self.saver = tf.train.Saver()
@@ -228,8 +226,8 @@ class KnowledgeBase:
             self.saver.restore(sess, ckpt.model_checkpoint_path)
 
     def train(self, sess, feed_dict):
-        o, l = sess.run([self.train_op, self.loss], feed_dict)
-        return l
+        o, l, t, reg = sess.run([self.train_op, self.loss, self.tensor, self.L2_regular], feed_dict)
+        return l, t, reg
 
     def is_nan(self, sess, feed_dict={}):
         return sess.run(tf.is_nan(self.tensor), feed_dict)
