@@ -3,6 +3,7 @@ import tensorflow as tf
 import random, os, pdb
 import logictensornetworks as ltn
 import config
+import time
 
 # swith between GPU and CPU
 tf_config = tf.ConfigProto(device_count={'GPU': 1})
@@ -52,10 +53,7 @@ parts_of_whole, wholes_of_part = get_part_whole_ontology()
 
 w1 = {}
 p1 = {}
-w2 = {}
-p2 = {}
-p1w1 = {}
-p2w2 = {}
+pw = {}
 oo = ltn.Domain(number_of_features * 2 + 2, label="same_object_pairs")
 o = ltn.Domain(number_of_features, label="a_generi_object")
 
@@ -67,10 +65,7 @@ w0p0 = ltn.Domain(number_of_features * 2 + 2, label="whole_part_pair")
 for t in selected_types:
     w1[t] = ltn.Domain(number_of_features, label="whole_predicted_objects_for_" + t)
     p1[t] = ltn.Domain(number_of_features, label="part_predicted_objects_for_" + t)
-    w2[t] = ltn.Domain(number_of_features, label="whole_predicted_objects_for_" + t)
-    p2[t] = ltn.Domain(number_of_features, label="part_predicted_objects_for_" + t)
-    p1w1[t] = ltn.Domain(number_of_features * 2 + 2, label="potential_part_whole_object_pairs_for_" + t)
-    p2w2[t] = ltn.Domain(number_of_features * 2 + 2, label="potential_whole_part_object_pairs_for_" + t)
+    pw[t] = ltn.Domain(number_of_features * 2 + 2, label="potential_part_whole_object_pairs_for_" + t)
 
 partOf_is_antisymmetric = [ltn.Clause([ltn.Literal(False, isPartOf, p0w0), ltn.Literal(False, isPartOf, w0p0)],
                                       label="part_of_is_antisymmetric", weight=0.37)]
@@ -79,13 +74,13 @@ partof_is_irreflexive = [ltn.Clause([ltn.Literal(False, isPartOf, oo)],
                                     label="part_of_is_irreflexive", weight=0.37)]
 
 clauses_for_parts_of_wholes = [ltn.Clause([ltn.Literal(False, isOfType[w], w1[w]),
-                                           ltn.Literal(False, isPartOf, p1w1[w])] + \
+                                           ltn.Literal(False, isPartOf, pw[w])] + \
                                           [ltn.Literal(True, isOfType[p], p1[w]) for p in parts_of_whole[w]],
                                           label="parts_of_" + w) for w in parts_of_whole.keys()]
 
-clauses_for_wholes_of_parts = [ltn.Clause([ltn.Literal(False, isOfType[p], p2[p]),
-                                           ltn.Literal(False, isPartOf, p2w2[p])] +
-                                          [ltn.Literal(True, isOfType[w], w2[p]) for w in wholes_of_part[p]],
+clauses_for_wholes_of_parts = [ltn.Clause([ltn.Literal(False, isOfType[p], p1[p]),
+                                           ltn.Literal(False, isPartOf, pw[p])] +
+                                          [ltn.Literal(True, isOfType[w], w1[p]) for w in wholes_of_part[p]],
                                           label="wholes_of_" + p) for p in wholes_of_part.keys()]
 
 clauses_for_disjoint_types = [ltn.Clause([ltn.Literal(False, isOfType[t], o),
@@ -153,8 +148,7 @@ def add_noise_to_data(noise_ratio):
            idxs_of_noisy_positive_examples_of_partOf, idxs_of_noisy_negative_examples_of_partOf
 
 
-def train(frequency_of_feed_dict_generation=250,
-          alg='nc',
+def train(alg='nc',
           noise_ratio=0.0,
           start_from_iter=0,
           saturation_limit=0.90):
@@ -183,6 +177,37 @@ def train(frequency_of_feed_dict_generation=250,
 
     prior_mean = []
     prior_lambda = config.REGULARIZATION
+
+    def train_fn(with_facts, with_constraints):
+        train_kb = True
+        for i in range(config.MAX_PRIOR_TRAINING_IT):
+            ti = time.time()
+            if i % config.FREQ_OF_FEED_DICT_GENERATION == 0:
+                train_kb = True
+                feed_dict = get_feed_dict(idxs_of_noisy_positive_examples_of_types,
+                                          idxs_of_noisy_negative_examples_of_types,
+                                          idxs_of_noisy_positive_examples_of_partOf,
+                                          idxs_of_noisy_negative_examples_of_partOf,
+                                          pairs_of_train_data, with_constraints=with_constraints,
+                                          with_facts=with_facts)
+                feed_dict[KB.prior_mean] = prior_mean
+                feed_dict[KB.prior_lambda] = prior_lambda
+            if i % config.FREQ_OF_SAVE:
+                KB.save(sess)
+            if train_kb:
+                # TODO: Doesn't this run the whole code twice????????
+                sat_level, normal_loss, reg_loss = KB.train(sess, feed_dict)
+                if np.isnan(sat_level):
+                    train_kb = False
+                if normal_loss < 0:  # Using log-likelihood aggregation
+                    sat_level = np.exp(-sat_level)
+                if sat_level >= saturation_limit:
+                    KB.save(sess)
+                    train_kb = False
+
+            print(str(i) + ' --> ' + str(sat_level), normal_loss, reg_loss, time.time() - ti)
+        return feed_dict
+
     if alg == 'prior':
         # defining the KB. Only train using rules.
         KB = ltn.KnowledgeBase(kb_label, predicates, rules, "models/")
@@ -193,28 +218,9 @@ def train(frequency_of_feed_dict_generation=250,
             sess.run(init)
             prior_mean = np.zeros(sess.run(KB.num_params, {}))
 
-            train_kb = True
-            for i in range(config.MAX_PRIOR_TRAINING_IT):
-                if i % frequency_of_feed_dict_generation == 0:
-                    if train_kb:
-                        KB.save(sess)
-                    else:
-                        train_kb = True
-                    feed_dict = get_feed_dict(idxs_of_noisy_positive_examples_of_types, idxs_of_noisy_negative_examples_of_types,
-                                              idxs_of_noisy_positive_examples_of_partOf, idxs_of_noisy_negative_examples_of_partOf,
-                                              pairs_of_train_data, with_facts=False)
-                    feed_dict[KB.prior_mean] = prior_mean
-                    feed_dict[KB.prior_lambda] = prior_lambda
-                if train_kb:
-                    sat_level, normal_loss, reg_loss = KB.train(sess, feed_dict)
-                    if np.isnan(sat_level):
-                        train_kb = False
-                    if normal_loss < 0:  # Using log-likelihood aggregation
-                        sat_level = np.exp(-sat_level)
-                    if sat_level >= saturation_limit:
-                        train_kb = False
-                    print(str(i) + ' --> ' + str(sat_level), normal_loss, reg_loss)
-            # Create the parameters for the prior
+            feed_dict = train_fn(with_facts=False, with_constraints=True)
+
+            # Create the parameters for the informative prior
             prior_mean = sess.run(KB.omega, feed_dict)
             prior_lambda = config.LAMBDA_2
 
@@ -230,30 +236,9 @@ def train(frequency_of_feed_dict_generation=250,
     if len(prior_mean) == 0:
         prior_mean = np.zeros(sess.run(KB.num_params, {}))
 
-    train_kb = True
-    for i in range(config.MAX_TRAINING_ITERATIONS):
-        if i % frequency_of_feed_dict_generation == 0:
-            if train_kb:
-                KB.save(sess)
-            else:
-                train_kb = True
-            feed_dict = get_feed_dict(idxs_of_noisy_positive_examples_of_types, idxs_of_noisy_negative_examples_of_types,
-                                      idxs_of_noisy_positive_examples_of_partOf, idxs_of_noisy_negative_examples_of_partOf,
-                                      pairs_of_train_data, with_constraints=alg == 'wc')
-            feed_dict[KB.prior_mean] = prior_mean
-            feed_dict[KB.prior_lambda] = prior_lambda
-        if train_kb:
-            # TODO: Doesn't this run the whole code twice????????
-            sat_level, normal_loss, reg_loss = KB.train(sess, feed_dict)
-            if np.isnan(sat_level):
-                train_kb = False
-            if normal_loss < 0: # Using log-likelihood aggregation
-                sat_level = np.exp(-sat_level)
-            if sat_level >= saturation_limit:
-                KB.save(sess)
-                train_kb = False
+    train_fn(with_facts=True, with_constraints=alg == 'wc')
 
-        print(str(i) + ' --> ' + str(sat_level), normal_loss, reg_loss)
+    KB.save(sess)
     print("end of training")
     sess.close()
 
@@ -261,7 +246,7 @@ def train(frequency_of_feed_dict_generation=250,
 def get_feed_dict(idxs_of_pos_ex_of_types, idxs_of_neg_ex_of_types,
                   idxs_of_pos_ex_of_partOf, idxs_of_neg_ex_of_partOf,
                   pairs_data, with_constraints=True, with_facts=True):
-    print("selecting new training data")
+    # print("selecting new training data")
     feed_dict = {}
 
     if with_facts:
@@ -285,13 +270,9 @@ def get_feed_dict(idxs_of_pos_ex_of_types, idxs_of_neg_ex_of_types,
 
     if with_constraints:
         for t in selected_types:
-            feed_dict[p1w1[t].tensor] = tmp
-            feed_dict[w1[t].tensor]   = feed_dict[p1w1[t].tensor][:, number_of_features:2 * number_of_features]
-            feed_dict[p1[t].tensor]   = feed_dict[p1w1[t].tensor][:, :number_of_features]
-
-            feed_dict[p2w2[t].tensor] = tmp
-            feed_dict[w2[t].tensor]   = feed_dict[p2w2[t].tensor][:, number_of_features:2 * number_of_features]
-            feed_dict[p2[t].tensor]   = feed_dict[p2w2[t].tensor][:, :number_of_features]
+            feed_dict[pw[t].tensor] = tmp
+            feed_dict[w1[t].tensor] = tmp[:, number_of_features:2 * number_of_features]
+            feed_dict[p1[t].tensor] = tmp[:, :number_of_features]
 
         feed_dict[oo.tensor] = np.concatenate([tmp[:, :number_of_features], tmp[:, :number_of_features],
                                                np.ones((tmp.shape[0], 2), dtype=float)], axis=1)
@@ -308,6 +289,5 @@ def get_feed_dict(idxs_of_pos_ex_of_types, idxs_of_neg_ex_of_types,
 
 for nr in config.NOISE_VALUES:
     for alg in config.ALGORITHMS:
-        train(frequency_of_feed_dict_generation=config.FREQ_OF_FEED_DICT_GENERATION,
-              alg=alg, noise_ratio=nr,
+        train(alg=alg, noise_ratio=nr,
               saturation_limit=config.SATURATION_LIMIT)
