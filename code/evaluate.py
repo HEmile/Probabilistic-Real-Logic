@@ -68,36 +68,26 @@ def auc(precision, recall):
     return np.trapz(np.array(precision)[idx_recall], x=np.array(recall)[idx_recall])
 
 
-def plot_recovery_chart(thresholds, performance_w, performance_wo, performance_b, label):
-    width = 0.03  # the width of the bars
+def plot_recovery_chart(thresholds, performance, label, model_names, colors=['b', 'g', 'r', 'y']):
+    width = 0.08 / len(performance)  # the width of the bars
     fig, ax = plt.subplots(figsize=(10.0, 8.0))
-    rects1 = ax.bar(thresholds - width, performance_w, width, color='b')
-    rects2 = ax.bar(thresholds, performance_wo, width, color='g')
+    rects = []
+    for i in range(len(performance)):
+        rects.append(ax.bar(thresholds + (i-len(performance) / 2) * width, performance[i], width, color=colors[i]))
+    ax.legend(rects, ['AUC ' + m for m in model_names])
     plt.ylabel('AUC', fontsize=22)
     plt.xlabel('Errors', fontsize=22)
     plt.title('AUC evolution for ' + label, fontsize=25)
     ax.set_xticks(thresholds)
-    ax.legend((rects1[0], rects2[0]), ('AUC LTN_prior', 'AUC LTN_expl'))
     plt.axis([-0.05, 0.47, 0.1, 0.85])
     fig.savefig(os.path.join(results_dir, 'AP_' + label + '.png'))
 
 
-def plot_prec_rec_curve(precisionW, recallW, precisionWO, recallWO, precisionB, recallB, label):
+def plot_prec_rec_curve(precisions, recalls, model_names, label, aucs, colors=['blue', 'green', 'red', 'yellow', 'pink', 'olive']):
     fig = plt.figure(figsize=(10.0, 8.0))
 
-    label_baseline_legend = 'FRCNN'
-    if 'part-of' in label:
-        recallB = [0.0, recallB[0]]
-        precisionB = [precisionB[0], precisionB[0]]
-        label_baseline_legend = 'RBPOF'
-
-    aucW = auc(precisionW, recallW)
-    aucWO = auc(precisionWO, recallWO)
-    aucB = auc(precisionB, recallB)
-
-    plt.plot(recallW, precisionW, lw=3, color='blue', label='LTN_prior: AUC={0:0.3f}'.format(aucW))
-    plt.plot(recallWO, precisionWO, lw=3, color='green', label='LTN_expl: AUC={0:0.3f}'.format(aucWO))
-    plt.plot(recallB, precisionB, lw=3, color='red', label=label_baseline_legend + ': AUC={0:0.3f}'.format(aucB))
+    for i in range(len(model_names)):
+        plt.plot(recalls[i], precisions[i], lw=3, color=colors[i], label=model_names[i]+': AUC={0:0.3f}'.format(aucs[i]))
     plt.xlabel('Recall', fontsize=22)
     plt.ylabel('Precision', fontsize=22)
     plt.title('Precision-Recall curve ' + label.split('_')[1], fontsize=25)
@@ -236,14 +226,6 @@ with open(os.path.join(results_dir, "report.csv"), "w") as report:
             measure_per_type[measure][mod][th][0, np.where(selected_types == t)[0][0]] for th in thresholds for measure
             in measures for mod in paths_to_models])
 
-ltn_performance_pof_w = []
-ltn_performance_pof_wo = []
-ltn_performance_pof_b = []
-ltn_performance_types_w = []
-ltn_performance_types_wo = []
-ltn_performance_types_b = []
-
-
 def adjust_prec(precision):
     prec = precision
     for idx_prec in range(len(precision)):
@@ -261,69 +243,56 @@ def stat(measures, model_name, index_type=None):
                       thresholds], [measures['recall'][model_name][th][0, 0] for th in
                       thresholds]
 
-for error in errors_percentage:
-    ap_types_w = []
-    ap_types_wo = []
-    ap_types_b = []
-    prec_types_w = []
-    prec_types_wo = []
-    prec_types_b = []
-    rec_types_w = []
-    rec_types_wo = []
-    rec_types_b = []
+def plot_curves(model_paths, model_names, ltn_performance_pof, ltn_performance_types, error):
+    precisions_pof = []
+    recalls_pof = []
+    for model in model_paths:
+        precision, recall = stat(measure_per_pof, model)
+        precision = adjust_prec(precision)
+        precisions_pof.append(precision)
+        recalls_pof.append(recall)
 
-    path_wc = models_dir + "KB_prior_nr_" + str(error) + ".ckpt"
-    path_nc = models_dir + "KB_wc_nr_" + str(error) + ".ckpt"
+    if 'baseline' in model_names:
+        base_index = model_names.index('baseline')
+        recalls_pof[base_index] = [0.0, recalls_pof[base_index][0]]
+        precisions_pof[base_index] = [precisions_pof[base_index][0], precisions_pof[base_index][0]]
 
-    precisionW, recallW = stat(measure_per_pof, path_wc)
-    precisionWO, recallWO = stat(measure_per_pof, path_nc)
-    precisionB_pof, recallB_pof = stat(measure_per_pof, 'baseline')
+    aucs_pof = [auc(precisions_pof[i], recalls_pof[i]) for i in range(len(model_names))]
+    plot_prec_rec_curve(precisions_pof, recalls_pof, model_names, str(int(error*100)) + '_part-of', aucs_pof)
 
-    precisionW = adjust_prec(precisionW)
-    precisionWO = adjust_prec(precisionWO)
-    precisionB_pof = adjust_prec(precisionB_pof)
+    precisions_types = [[] for _ in model_names]
+    recalls_types = [[] for _ in model_names]
+    aucs_types = [[] for _ in model_names]
 
-    plot_prec_rec_curve(precisionW, recallW, precisionWO, recallWO, precisionB_pof, recallB_pof,
-                        str(int(error * 100)) + '_part-of')
-
-    ltn_performance_pof_w.append(auc(precisionW, recallW))
-    ltn_performance_pof_wo.append(auc(precisionWO, recallWO))
-    recallB = [0.0, recallB_pof[0]]
-    precisionB = [precisionB_pof[0], precisionB_pof[0]]
-    ltn_performance_pof_b.append(auc(precisionB, recallB))
-
-    for t in selected_types:
+    for j in range(len(selected_types)):
+        t = selected_types[j]
         index_type = np.where(selected_types == t)[0][0]
+        for i in range(len(model_paths)):
+            model = model_paths[i]
+            precision, recall = stat(measure_per_type, model, index_type)
+            precisions_types[i].append(precision)
+            recalls_types[i].append(recall)
 
-        precisionW_types, recallW_types = stat(measure_per_type, path_wc, index_type)
-        precisionWO_types, recallWO_types = stat(measure_per_type, path_nc, index_type)
-        precisionB_types, recallB_types = stat(measure_per_type, 'baseline', index_type)
+            precision = adjust_prec(precision)
+            aucs_types[i].append(auc(precision, recall))
+        plot_prec_rec_curve([precisions_types[i][j] for i in range(len(model_names))],
+                            [recalls_types[i][j] for i in range(len(model_names))],
+                            model_names, str(int(error * 100)) + '_' + t,
+                            [aucs_types[i][j] for i in range(len(model_names))])
+    plot_prec_rec_curve([np.mean(precisions_types[i], axis=0) for i in range(len(model_names))],
+                        [np.mean(recalls_types[i], axis=0) for i in range(len(model_names))],
+                        model_names, str(int(error * 100)) + '_types',
+                        [np.mean(aucs_types[i]) for i in range(len(model_names))])
+    for i in range(len(aucs_pof)):
+        ltn_performance_pof[i].append(aucs_pof[i])
+        ltn_performance_types[i].append(np.mean(aucs_types[i]))
 
-        prec_types_w.append(precisionW_types)
-        prec_types_wo.append(precisionWO_types)
-        prec_types_b.append(precisionB_types)
-        rec_types_w.append(recallW_types)
-        rec_types_wo.append(recallWO_types)
-        rec_types_b.append(recallB_types)
 
-        precisionW_types = adjust_prec(precisionW_types)
-        precisionWO_types = adjust_prec(precisionWO_types)
-        precisionB_types = adjust_prec(precisionB_types)
-        plot_prec_rec_curve(precisionW_types, recallW_types, precisionWO_types, recallWO_types, precisionB_types,
-                            recallB_types, str(int(error * 100)) + "_" + t)
-
-        ap_types_w.append(auc(precisionW_types, recallW_types))
-        ap_types_wo.append(auc(precisionWO_types, recallWO_types))
-        ap_types_b.append(auc(precisionB_types, recallB_types))
-
-    plot_prec_rec_curve(np.mean(prec_types_w, axis=0), np.mean(rec_types_w, axis=0),
-                        np.mean(prec_types_wo, axis=0), np.mean(rec_types_wo, axis=0),
-                        np.mean(prec_types_b, axis=0), np.mean(rec_types_b, axis=0), str(int(error * 100)) + "_types")
-
-    ltn_performance_types_w.append(np.mean(ap_types_w))
-    ltn_performance_types_wo.append(np.mean(ap_types_wo))
-    ltn_performance_types_b.append(np.mean(ap_types_b))
-
-plot_recovery_chart(errors_percentage, ltn_performance_pof_w, ltn_performance_pof_wo, ltn_performance_pof_b, 'part-of')
-plot_recovery_chart(errors_percentage, ltn_performance_types_w, ltn_performance_types_wo, ltn_performance_types_b,
-                    'types')
+model_names = config.ALGORITHMS
+ltn_performance_pof = [[] for _ in range(len(model_names))]
+ltn_performance_types = [[] for _ in range(len(model_names))]
+for error in errors_percentage:
+    model_paths = [models_dir + constr + str(error) + ".ckpt" for constr in constraints_choice]
+    plot_curves(model_paths, model_names, ltn_performance_pof, ltn_performance_types, error)
+plot_recovery_chart(errors_percentage, ltn_performance_pof, 'part-of', model_names)
+plot_recovery_chart(errors_percentage, ltn_performance_types, 'types', model_names)
