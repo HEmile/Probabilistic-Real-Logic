@@ -178,9 +178,9 @@ def train(alg='nc',
     prior_mean = []
     prior_lambda = config.REGULARIZATION
 
-    def train_fn(with_facts, with_constraints):
+    def train_fn(with_facts, with_constraints, iterations):
         train_kb = True
-        for i in range(config.MAX_PRIOR_TRAINING_IT):
+        for i in range(iterations):
             ti = time.time()
             if i % config.FREQ_OF_FEED_DICT_GENERATION == 0:
                 train_kb = True
@@ -192,10 +192,9 @@ def train(alg='nc',
                                           with_facts=with_facts)
                 feed_dict[KB.prior_mean] = prior_mean
                 feed_dict[KB.prior_lambda] = prior_lambda
-            if i % config.FREQ_OF_SAVE:
+            if i % config.FREQ_OF_SAVE == 0:
                 KB.save(sess)
             if train_kb:
-                # TODO: Doesn't this run the whole code twice????????
                 sat_level, normal_loss, reg_loss = KB.train(sess, feed_dict)
                 if np.isnan(sat_level):
                     train_kb = False
@@ -218,7 +217,7 @@ def train(alg='nc',
             sess.run(init)
             prior_mean = np.zeros(sess.run(KB.num_params, {}))
 
-            feed_dict = train_fn(with_facts=False, with_constraints=True)
+            feed_dict = train_fn(with_facts=False, with_constraints=True, iterations=config.MAX_PRIOR_TRAINING_IT)
 
             # Create the parameters for the informative prior
             prior_mean = sess.run(KB.omega, feed_dict)
@@ -236,7 +235,7 @@ def train(alg='nc',
     if len(prior_mean) == 0:
         prior_mean = np.zeros(sess.run(KB.num_params, {}))
 
-    train_fn(with_facts=True, with_constraints=alg == 'wc')
+    train_fn(with_facts=True, with_constraints=alg == 'wc', iterations=config.MAX_TRAINING_ITERATIONS)
 
     KB.save(sess)
     print("end of training")
