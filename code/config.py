@@ -13,7 +13,7 @@ SATURATION_LIMIT = 0.95
 
 NOISE_VALUES = [0., 0.1, 0.2, 0.3, 0.4]
 
-LAMBDA_2_VALUES = [1e-8, 1e-7, 1e-6, 1e-5]
+LAMBDA_2_VALUES = [1e-8]# 1e-7, 1e-6, 1e-5]
 
 N_POS_EXAMPLES_TYPES = 250
 N_NEG_EXAMPLES_TYPES = 250
@@ -25,7 +25,9 @@ number_of_pairs_for_axioms = 1000
 DATASET = 'indoor'
 
 # List. Return [True, False] to create models for both training with and without constraints.
-ALGORITHMS = ['prior']
+# ALGORITHMS = ['prior']
+ALGORITHMS = ['prior_l2_1e-05', 'prior_l2_1e-07', 'wc', 'nc']
+# ALGORITHMS = ['nc', 'wc']
 
 # LOGIC TENSOR NETWORK SETUP
 DEFAULT_LAYERS = 2

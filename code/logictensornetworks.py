@@ -207,7 +207,6 @@ class KnowledgeBase:
             self.loss = self.L2_regular - self.tensor#PR(self.tensor)
         self.save_path = save_path
         self.train_op = train_op(self.loss, config.OPTIMIZER)
-        self.saver = tf.train.Saver()
 
     def penalize_positive_facts(self):
         tensor_for_positive_facts = [tf.reduce_sum(Literal(True, lit.predicate, lit.domain).tensor, keep_dims=True) for
@@ -215,7 +214,10 @@ class KnowledgeBase:
         return tf.reduce_sum(tf.concat(tensor_for_positive_facts, 0))
 
     def save(self, sess, label, version=""):
+        self.saver = tf.train.Saver()
+        print('Saving with label', label)
         save_path = self.saver.save(sess, self.save_path + label + version + ".ckpt")
+        print('Saved to', save_path)
 
     def restore(self, sess):
         ckpt = tf.train.get_checkpoint_state(self.save_path)

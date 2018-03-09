@@ -132,7 +132,7 @@ def add_noise_to_data(noise_ratio):
     idxs_of_noisy_positive_examples_of_partOf = np.where(partOf_of_pairs_of_train_data)[0]
     idxs_of_noisy_negative_examples_of_partOf = np.where(partOf_of_pairs_of_train_data == False)[0]
 
-    print("I have introduced the following errors (Emile: wut)")
+    print("I have introduced the following errors")
     for t in selected_types:
         print("wrong positive", t, len(np.setdiff1d(idxs_of_noisy_positive_examples_of_types[t],
                                               idxs_of_positive_examples_of_types[t])))
@@ -148,15 +148,8 @@ def add_noise_to_data(noise_ratio):
            idxs_of_noisy_positive_examples_of_partOf, idxs_of_noisy_negative_examples_of_partOf
 
 
-def train(KB_full, KB_facts, KB_rules, alg='nc',
-          noise_ratio=0.0,
+def train(KB_full, KB_facts, KB_rules, data, alg='nc', noise_ratio=0.0,
           saturation_limit=0.90, lambda_2=config.LAMBDA_2):
-    # add noise to train data
-    idxs_of_noisy_positive_examples_of_types, \
-    idxs_of_noisy_negative_examples_of_types, \
-    idxs_of_noisy_positive_examples_of_partOf, \
-    idxs_of_noisy_negative_examples_of_partOf = add_noise_to_data(noise_ratio)
-
     prior_mean = []
     prior_lambda = config.REGULARIZATION
 
@@ -169,15 +162,10 @@ def train(KB_full, KB_facts, KB_rules, alg='nc',
             ti = time.time()
             if i % config.FREQ_OF_FEED_DICT_GENERATION == 0:
                 train_kb = True
-                feed_dict = get_feed_dict(idxs_of_noisy_positive_examples_of_types,
-                                          idxs_of_noisy_negative_examples_of_types,
-                                          idxs_of_noisy_positive_examples_of_partOf,
-                                          idxs_of_noisy_negative_examples_of_partOf,
-                                          pairs_of_train_data, with_constraints=with_constraints,
-                                          with_facts=with_facts)
+                feed_dict = get_feed_dict(data, pairs_of_train_data,
+                                          with_constraints=with_constraints, with_facts=with_facts)
                 feed_dict[KB.prior_mean] = prior_mean
                 feed_dict[KB.prior_lambda] = prior_lambda
-                #TODO: At some point, this part starts going to a crawl. Why??
             if i + 1 % config.FREQ_OF_SAVE == 0:
                 print('Saving the model to a file')
                 KB.save(sess, kb_label)
@@ -195,7 +183,7 @@ def train(KB_full, KB_facts, KB_rules, alg='nc',
 
     # Make sure the graph is cleaned up after each experiment run to reduce memory usage.
     if alg == 'prior':
-        kb_label = "KB_" + alg + 'l2_' + str(lambda_2) + "_nr_" + str(noise_ratio)
+        kb_label = "KB_" + alg + '_l2_' + str(lambda_2) + "_nr_" + str(noise_ratio)
         KB = KB_rules
 
         # start training
@@ -226,10 +214,12 @@ def train(KB_full, KB_facts, KB_rules, alg='nc',
     sess.close()
 
 
-def get_feed_dict(idxs_of_pos_ex_of_types, idxs_of_neg_ex_of_types,
-                  idxs_of_pos_ex_of_partOf, idxs_of_neg_ex_of_partOf,
-                  pairs_data, with_constraints=True, with_facts=True):
+def get_feed_dict(data, pairs_data, with_constraints=True, with_facts=True):
     # print("selecting new training data")
+
+    idxs_of_pos_ex_of_types, idxs_of_neg_ex_of_types, \
+    idxs_of_pos_ex_of_partOf, idxs_of_neg_ex_of_partOf = data
+
     feed_dict = {}
 
     if with_facts:
@@ -285,8 +275,8 @@ KB_facts = ltn.KnowledgeBase(predicates, facts, "models/")
 KB_rules = ltn.KnowledgeBase(predicates, rules, "models/")
 
 for nr in config.NOISE_VALUES:
+    data = add_noise_to_data(nr)
     for alg in config.ALGORITHMS:
         for lambda_2 in config.LAMBDA_2_VALUES:
-            train(KB_full, KB_facts, KB_rules, alg=alg, noise_ratio=nr,
-                  saturation_limit=config.SATURATION_LIMIT,
-                  lambda_2=lambda_2)
+            train(KB_full, KB_facts, KB_rules, data, alg=alg, noise_ratio=nr,
+                  saturation_limit=config.SATURATION_LIMIT, lambda_2=lambda_2)

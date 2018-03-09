@@ -81,6 +81,7 @@ def plot_recovery_chart(thresholds, performance, label, model_names, colors=['b'
     ax.set_xticks(thresholds)
     plt.axis([-0.05, 0.47, 0.1, 0.85])
     fig.savefig(os.path.join(results_dir, 'AP_' + label + '.png'))
+    plt.close(fig)
 
 
 def plot_prec_rec_curve(precisions, recalls, model_names, label, aucs, colors=['blue', 'green', 'red', 'yellow', 'pink', 'olive']):
@@ -94,6 +95,7 @@ def plot_prec_rec_curve(precisions, recalls, model_names, label, aucs, colors=['
     plt.legend(loc="lower left")
 
     fig.savefig(os.path.join(results_dir, 'prec_rec_curve_' + label + '.png'))
+    plt.close(fig)
 
 
 def confusion_matrix_for_baseline(thresholds, with_partof_axioms=False):
