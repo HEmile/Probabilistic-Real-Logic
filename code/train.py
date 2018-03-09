@@ -192,19 +192,21 @@ def train(alg='nc',
                                           with_facts=with_facts)
                 feed_dict[KB.prior_mean] = prior_mean
                 feed_dict[KB.prior_lambda] = prior_lambda
+                #TODO: At some point, this part starts going to a crawl. Why??
             if i % config.FREQ_OF_SAVE == 0:
+                print('Saving the model to a file')
                 KB.save(sess)
             if train_kb:
+                ti2 = time.time()
                 sat_level, normal_loss, reg_loss = KB.train(sess, feed_dict)
                 if np.isnan(sat_level):
                     train_kb = False
                 if normal_loss < 0:  # Using log-likelihood aggregation
                     sat_level = np.exp(-sat_level)
                 if sat_level >= saturation_limit:
-                    KB.save(sess)
                     train_kb = False
 
-            print(str(i) + ' --> ' + str(sat_level), normal_loss, reg_loss, time.time() - ti)
+            print(str(i) + ' --> ' + str(sat_level), normal_loss, reg_loss, time.time() - ti, time.time() - ti2)
         return feed_dict
 
     if alg == 'prior':
@@ -248,6 +250,8 @@ def get_feed_dict(idxs_of_pos_ex_of_types, idxs_of_neg_ex_of_types,
     # print("selecting new training data")
     feed_dict = {}
 
+    ti1 = time.time()
+
     if with_facts:
         # positive and negative examples for types
         for t in existing_types:
@@ -262,7 +266,7 @@ def get_feed_dict(idxs_of_pos_ex_of_types, idxs_of_neg_ex_of_types,
 
         feed_dict[object_pairs_not_in_partOf.tensor] = \
             pairs_of_train_data[np.random.choice(idxs_of_neg_ex_of_partOf, config.N_NEG_EXAMPLES_PARTOF)]
-
+    ti2 = time.time()
     # feed data for axioms
     tmp = pairs_data[np.random.choice(range(pairs_data.shape[0]), number_of_pairs_for_axioms)]
     feed_dict[o.tensor] = tmp[:, :number_of_features]
@@ -283,6 +287,7 @@ def get_feed_dict(idxs_of_pos_ex_of_types, idxs_of_neg_ex_of_types,
     # print("feed dict size is as follows")
     # for k in feed_dict:
     #     print(k.name, feed_dict[k].shape)
+    print('Feed dict time', ti2 - ti1, time.time() - ti2)
     return feed_dict
 
 
