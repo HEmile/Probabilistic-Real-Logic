@@ -148,35 +148,20 @@ def add_noise_to_data(noise_ratio):
            idxs_of_noisy_positive_examples_of_partOf, idxs_of_noisy_negative_examples_of_partOf
 
 
-def train(alg='nc',
+def train(KB_full, KB_facts, KB_rules, alg='nc',
           noise_ratio=0.0,
-          start_from_iter=0,
-          saturation_limit=0.90):
+          saturation_limit=0.90, lambda_2=config.LAMBDA_2):
     # add noise to train data
     idxs_of_noisy_positive_examples_of_types, \
     idxs_of_noisy_negative_examples_of_types, \
     idxs_of_noisy_positive_examples_of_partOf, \
     idxs_of_noisy_negative_examples_of_partOf = add_noise_to_data(noise_ratio)
 
-    use_constraints = alg != 'nc'
-
-    # defining the clauses of the background knowledge
-    facts = clauses_for_positive_examples_of_types + \
-              clauses_for_negative_examples_of_types + \
-              clause_for_positive_examples_of_partOf + \
-              clause_for_negative_examples_of_partOf
-
-    rules = partof_is_irreflexive + partOf_is_antisymmetric + clauses_for_wholes_of_parts + \
-        clauses_for_parts_of_wholes + clauses_for_disjoint_types + clause_for_at_least_one_type
+    prior_mean = []
+    prior_lambda = config.REGULARIZATION
 
     # defining the label of the background knowledge
     kb_label = "KB_" + alg + "_nr_" + str(noise_ratio)
-
-    # Lists all predicates
-    predicates = list(isOfType.values()) + [isPartOf]
-
-    prior_mean = []
-    prior_lambda = config.REGULARIZATION
 
     def train_fn(with_facts, with_constraints, iterations):
         train_kb = True
@@ -193,11 +178,10 @@ def train(alg='nc',
                 feed_dict[KB.prior_mean] = prior_mean
                 feed_dict[KB.prior_lambda] = prior_lambda
                 #TODO: At some point, this part starts going to a crawl. Why??
-            if i % config.FREQ_OF_SAVE == 0:
+            if i + 1 % config.FREQ_OF_SAVE == 0:
                 print('Saving the model to a file')
-                KB.save(sess)
+                KB.save(sess, kb_label)
             if train_kb:
-                ti2 = time.time()
                 sat_level, normal_loss, reg_loss = KB.train(sess, feed_dict)
                 if np.isnan(sat_level):
                     train_kb = False
@@ -205,13 +189,14 @@ def train(alg='nc',
                     sat_level = np.exp(-sat_level)
                 if sat_level >= saturation_limit:
                     train_kb = False
-
-            print(str(i) + ' --> ' + str(sat_level), normal_loss, reg_loss, time.time() - ti, time.time() - ti2)
+            if i % config.FREQ_OF_PRINT == 0:
+                print(i, 'Sat level', str(sat_level), 'loss',  normal_loss, 'regularization', reg_loss, 'iteration time', time.time() - ti)
         return feed_dict
 
+    # Make sure the graph is cleaned up after each experiment run to reduce memory usage.
     if alg == 'prior':
-        # defining the KB. Only train using rules.
-        KB = ltn.KnowledgeBase(kb_label, predicates, rules, "models/")
+        kb_label += 'l2_' + str(lambda_2)
+        KB = KB_rules
 
         # start training
         init = tf.global_variables_initializer()
@@ -223,12 +208,9 @@ def train(alg='nc',
 
             # Create the parameters for the informative prior
             prior_mean = sess.run(KB.omega, feed_dict)
-            prior_lambda = config.LAMBDA_2
+            prior_lambda = lambda_2
 
-    if alg == 'wc':
-        KB = ltn.KnowledgeBase(kb_label, predicates, facts + rules, "models/")
-    else:
-        KB = ltn.KnowledgeBase(kb_label, predicates, facts, "models/")
+    KB = KB_full if alg == 'wc' else KB_facts
 
     # start training
     init = tf.global_variables_initializer()
@@ -239,7 +221,7 @@ def train(alg='nc',
 
     train_fn(with_facts=True, with_constraints=alg == 'wc', iterations=config.MAX_TRAINING_ITERATIONS)
 
-    KB.save(sess)
+    KB.save(sess, kb_label)
     print("end of training")
     sess.close()
 
@@ -249,8 +231,6 @@ def get_feed_dict(idxs_of_pos_ex_of_types, idxs_of_neg_ex_of_types,
                   pairs_data, with_constraints=True, with_facts=True):
     # print("selecting new training data")
     feed_dict = {}
-
-    ti1 = time.time()
 
     if with_facts:
         # positive and negative examples for types
@@ -266,7 +246,6 @@ def get_feed_dict(idxs_of_pos_ex_of_types, idxs_of_neg_ex_of_types,
 
         feed_dict[object_pairs_not_in_partOf.tensor] = \
             pairs_of_train_data[np.random.choice(idxs_of_neg_ex_of_partOf, config.N_NEG_EXAMPLES_PARTOF)]
-    ti2 = time.time()
     # feed data for axioms
     tmp = pairs_data[np.random.choice(range(pairs_data.shape[0]), number_of_pairs_for_axioms)]
     feed_dict[o.tensor] = tmp[:, :number_of_features]
@@ -287,11 +266,27 @@ def get_feed_dict(idxs_of_pos_ex_of_types, idxs_of_neg_ex_of_types,
     # print("feed dict size is as follows")
     # for k in feed_dict:
     #     print(k.name, feed_dict[k].shape)
-    print('Feed dict time', ti2 - ti1, time.time() - ti2)
     return feed_dict
 
+# defining the clauses of the background knowledge
+facts = clauses_for_positive_examples_of_types + clauses_for_negative_examples_of_types + \
+        clause_for_positive_examples_of_partOf + clause_for_negative_examples_of_partOf
+
+rules = partof_is_irreflexive + partOf_is_antisymmetric + clauses_for_wholes_of_parts + \
+    clauses_for_parts_of_wholes + clauses_for_disjoint_types + clause_for_at_least_one_type
+
+# Lists all predicates
+predicates = list(isOfType.values()) + [isPartOf]
+
+# Create the different knowledge bases.
+print('Defining knowledge bases')
+KB_full = ltn.KnowledgeBase(predicates, facts + rules, "models/")
+KB_facts = ltn.KnowledgeBase(predicates, facts, "models/")
+KB_rules = ltn.KnowledgeBase(predicates, rules, "models/")
 
 for nr in config.NOISE_VALUES:
     for alg in config.ALGORITHMS:
-        train(alg=alg, noise_ratio=nr,
-              saturation_limit=config.SATURATION_LIMIT)
+        for lambda_2 in config.LAMBDA_2_VALUES:
+            train(KB_full, KB_facts, KB_rules, alg=alg, noise_ratio=nr,
+                  saturation_limit=config.SATURATION_LIMIT,
+                  lambda_2=lambda_2)

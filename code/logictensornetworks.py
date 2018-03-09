@@ -164,9 +164,7 @@ class Clause:
 
 class KnowledgeBase:
     # Note: This does not currently support functions
-    def __init__(self, label, predicates, clauses, save_path=""):
-        print("defining the knowledge base", label)
-        self.label = label
+    def __init__(self, predicates, clauses, save_path=""):
         self.clauses = clauses
         if not self.clauses:
             self.tensor = tf.constant(1.0)
@@ -216,8 +214,8 @@ class KnowledgeBase:
                                      cl in self.clauses for lit in cl.literals]
         return tf.reduce_sum(tf.concat(tensor_for_positive_facts, 0))
 
-    def save(self, sess, version=""):
-        save_path = self.saver.save(sess, self.save_path + self.label + version + ".ckpt")
+    def save(self, sess, label, version=""):
+        save_path = self.saver.save(sess, self.save_path + label + version + ".ckpt")
 
     def restore(self, sess):
         ckpt = tf.train.get_checkpoint_state(self.save_path)
