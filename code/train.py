@@ -195,7 +195,7 @@ def train(KB_full, KB_facts, KB_rules, alg='nc',
 
     # Make sure the graph is cleaned up after each experiment run to reduce memory usage.
     if alg == 'prior':
-        kb_label += 'l2_' + str(lambda_2)
+        kb_label = "KB_" + alg + 'l2_' + str(lambda_2) + "_nr_" + str(noise_ratio)
         KB = KB_rules
 
         # start training
