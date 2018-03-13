@@ -13,7 +13,7 @@ number_of_pairs_for_axioms = 1000
 train_data, pairs_of_train_data, types_of_train_data, partOf_of_pairs_of_train_data, _, _ = get_data("train",
                                                                                                      max_rows=1000000000)
 
-# computing positive and negative exampls for types and partof
+# computing positive and negative examples for types and partof
 
 idxs_of_positive_examples_of_types = {}
 idxs_of_negative_examples_of_types = {}
@@ -89,6 +89,8 @@ clauses_for_disjoint_types = [ltn.Clause([ltn.Literal(False, isOfType[t], o),
 
 clause_for_at_least_one_type = [
     ltn.Clause([ltn.Literal(True, isOfType[t], o) for t in selected_types], label="an_object_has_at_least_one_type")]
+
+
 # return partof_is_irreflexive + partOf_is_antisymmetric + clauses_for_wholes_of_parts + \
 #     clauses_for_parts_of_wholes + clauses_for_disjoint_types + clause_for_at_least_one_type
 
@@ -114,7 +116,7 @@ def add_noise_to_data(noise_ratio):
                                                                     for t1 in not_types_of_idx]))
 
         noisy_data_pairs_idxs = np.append(np.random.choice(np.where(partOf_of_pairs_of_train_data)[0], int(
-                                                               partOf_of_pairs_of_train_data.sum() * noise_ratio * 0.5)),
+            partOf_of_pairs_of_train_data.sum() * noise_ratio * 0.5)),
                                           np.random.choice(np.where(np.logical_not(partOf_of_pairs_of_train_data))[0],
                                                            int(
                                                                partOf_of_pairs_of_train_data.sum() * noise_ratio * 0.5)))
@@ -135,26 +137,26 @@ def add_noise_to_data(noise_ratio):
     print("I have introduced the following errors")
     for t in selected_types:
         print("wrong positive", t, len(np.setdiff1d(idxs_of_noisy_positive_examples_of_types[t],
-                                              idxs_of_positive_examples_of_types[t])))
+                                                    idxs_of_positive_examples_of_types[t])))
         print("wrong negative", t, len(np.setdiff1d(idxs_of_noisy_negative_examples_of_types[t],
-                                              idxs_of_negative_examples_of_types[t])))
+                                                    idxs_of_negative_examples_of_types[t])))
 
     print("wrong positive partof", len(np.setdiff1d(idxs_of_noisy_positive_examples_of_partOf,
-                                              idxs_of_positive_examples_of_partOf)))
+                                                    idxs_of_positive_examples_of_partOf)))
     print("wrong negative partof", len(np.setdiff1d(idxs_of_noisy_negative_examples_of_partOf,
-                                              idxs_of_negative_examples_of_partOf)))
+                                                    idxs_of_negative_examples_of_partOf)))
 
     return idxs_of_noisy_positive_examples_of_types, idxs_of_noisy_negative_examples_of_types, \
            idxs_of_noisy_positive_examples_of_partOf, idxs_of_noisy_negative_examples_of_partOf
 
 
-def train(KB_full, KB_facts, KB_rules, data, alg='nc', noise_ratio=0.0,
+def train(KB_full, KB_facts, KB_rules, data, alg='nc', noise_ratio=0.0, data_ratio=config.RATIO_DATA,
           saturation_limit=0.90, lambda_2=config.LAMBDA_2):
     prior_mean = []
     prior_lambda = config.REGULARIZATION
 
     # defining the label of the background knowledge
-    kb_label = "KB_" + alg + "_nr_" + str(noise_ratio)
+    kb_label = "KB_" + alg + "_nr_" + str(noise_ratio) + "_dr_" + str(data_ratio)
 
     def train_fn(with_facts, with_constraints, iterations):
         train_kb = True
@@ -178,12 +180,13 @@ def train(KB_full, KB_facts, KB_rules, data, alg='nc', noise_ratio=0.0,
                 if sat_level >= saturation_limit:
                     train_kb = False
             if i % config.FREQ_OF_PRINT == 0:
-                print(i, 'Sat level', str(sat_level), 'loss',  normal_loss, 'regularization', reg_loss, 'iteration time', time.time() - ti)
+                print(i, 'Sat level', str(sat_level), 'loss', normal_loss, 'regularization', reg_loss, 'iteration time',
+                      time.time() - ti)
         return feed_dict
 
     # Make sure the graph is cleaned up after each experiment run to reduce memory usage.
     if alg == 'prior':
-        kb_label = "KB_" + alg + '_l2_' + str(lambda_2) + "_nr_" + str(noise_ratio)
+        kb_label = "KB_" + alg + '_l2_' + str(lambda_2) + "_nr_" + str(noise_ratio) + "_dr_" + str(data_ratio)
         KB = KB_rules
 
         # start training
@@ -249,8 +252,8 @@ def get_feed_dict(data, pairs_data, with_constraints=True, with_facts=True):
         feed_dict[oo.tensor] = np.concatenate([tmp[:, :number_of_features], tmp[:, :number_of_features],
                                                np.ones((tmp.shape[0], 2), dtype=float)], axis=1)
         feed_dict[p0w0.tensor] = tmp
-        feed_dict[w0.tensor]   = feed_dict[p0w0.tensor][:, number_of_features:2 * number_of_features]
-        feed_dict[p0.tensor]   = feed_dict[p0w0.tensor][:, :number_of_features]
+        feed_dict[w0.tensor] = feed_dict[p0w0.tensor][:, number_of_features:2 * number_of_features]
+        feed_dict[p0.tensor] = feed_dict[p0w0.tensor][:, :number_of_features]
         feed_dict[w0p0.tensor] = np.concatenate([
             feed_dict[w0.tensor], feed_dict[p0.tensor], feed_dict[p0w0.tensor][:, -1:-3:-1]], axis=1)
     # print("feed dict size is as follows")
@@ -258,12 +261,13 @@ def get_feed_dict(data, pairs_data, with_constraints=True, with_facts=True):
     #     print(k.name, feed_dict[k].shape)
     return feed_dict
 
+
 # defining the clauses of the background knowledge
 facts = clauses_for_positive_examples_of_types + clauses_for_negative_examples_of_types + \
         clause_for_positive_examples_of_partOf + clause_for_negative_examples_of_partOf
 
 rules = partof_is_irreflexive + partOf_is_antisymmetric + clauses_for_wholes_of_parts + \
-    clauses_for_parts_of_wholes + clauses_for_disjoint_types + clause_for_at_least_one_type
+        clauses_for_parts_of_wholes + clauses_for_disjoint_types + clause_for_at_least_one_type
 
 # Lists all predicates
 predicates = list(isOfType.values()) + [isPartOf]
@@ -277,6 +281,7 @@ KB_rules = ltn.KnowledgeBase(predicates, rules, "models/")
 for nr in config.NOISE_VALUES:
     data = add_noise_to_data(nr)
     for alg in config.ALGORITHMS:
-        for lambda_2 in config.LAMBDA_2_VALUES:
+        lambda_2s = config.LAMBDA_2_VALUES if alg == 'prior' else [config.LAMBDA_2]
+        for lambda_2 in lambda_2s:
             train(KB_full, KB_facts, KB_rules, data, alg=alg, noise_ratio=nr,
                   saturation_limit=config.SATURATION_LIMIT, lambda_2=lambda_2)

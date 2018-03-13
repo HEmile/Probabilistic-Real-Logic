@@ -35,7 +35,7 @@ def disjunction_of_literals(literals, label="no_label"):
         result = tf.reduce_max(literals_tensor, 1, keep_dims=True, name=label)
     if config.FORALL_AGGREGATOR == "product":
         if config.CLAUSE_AGGREGATOR == 'log-likelihood':
-            return tf.reduce_mean(tf.log(literals_tensor), keep_dims=True, name=label)
+            return tf.reduce_sum(tf.log(literals_tensor), keep_dims=True, name=label)
         else:
             return tf.exp(tf.reduce_mean(tf.log(literals_tensor), keep_dims=True), name=label)
         # return tf.reduce_prod(result, keep_dims=True)

@@ -4,6 +4,7 @@ import numpy as np
 import csv, pdb
 import timeit
 import config
+import random
 
 data_training_dir = "data/training/"
 data_testing_dir = "data/testing/"
@@ -69,7 +70,10 @@ def get_data(train_or_test_swritch, max_rows=10000000):
         data_dir = data_testing_dir
     data = np.genfromtxt(data_dir + "features.csv", delimiter=",", max_rows=max_rows)
     types_of_data = types[np.genfromtxt(data_dir + "types.csv", dtype="i", max_rows=max_rows)]
+
+    # Contains the id of the bounding box that is the 'whole' of this object, and -1 if there is no such box.
     idx_whole_for_data = np.genfromtxt(data_dir + "partOf.csv", dtype="i", max_rows=max_rows)
+
     idx_of_cleaned_data = np.where(np.logical_and(
         np.all(data[:, -2:] - data[:, -4:-2] >= zero_distance_threshold, axis=1),
         np.in1d(types_of_data, selected_types)))[0]
@@ -80,12 +84,17 @@ def get_data(train_or_test_swritch, max_rows=10000000):
     # Cleaning data by removing small bounding boxes and recomputing indexes of partof data
 
     types_of_data = types_of_data[idx_of_cleaned_data]
-    idx_whole_for_data = idx_whole_for_data[idx_of_cleaned_data]
-    for i in range(len(idx_whole_for_data)):
-        if idx_whole_for_data[i] != -1 and idx_whole_for_data[i] in idx_of_cleaned_data:
-            idx_whole_for_data[i] = np.where(idx_whole_for_data[i] == idx_of_cleaned_data)[0]
-        else:
-            idx_whole_for_data[i] = -1
+
+    def filter_references(id_references, filtered_ids):
+        id_references = id_references[filtered_ids]
+        for ii in range(len(id_references)):
+            if id_references[ii] != -1 and id_references[ii] in filtered_ids:
+                id_references[ii] = np.where(id_references[ii] == filtered_ids)[0]
+            else:
+                id_references[ii] = -1
+        return id_references
+
+    idx_whole_for_data = filter_references(idx_whole_for_data, idx_of_cleaned_data)
 
     # Grouping bbs that belong to the same picture
 
@@ -95,6 +104,23 @@ def get_data(train_or_test_swritch, max_rows=10000000):
             pics[data[i][0]].append(i)
         else:
             pics[data[i][0]] = [i]
+
+    if config.RATIO_DATA < 1:
+        pics_to_remove = random.sample(pics.keys(), int((1-config.RATIO_DATA)*len(pics.keys())))
+        for i in pics_to_remove:
+            del pics[i]
+        ids_of_selected_data = [i for i in range(len(data)) if data[i][0] in pics]
+
+        data = data[ids_of_selected_data]
+        idx_whole_for_data = filter_references(idx_whole_for_data, ids_of_selected_data)
+        types_of_data = types_of_data[ids_of_selected_data]
+
+        pics = {}
+        for i in range(len(data)):
+            if data[i][0] in pics:
+                pics[data[i][0]].append(i)
+            else:
+                pics[data[i][0]] = [i]
 
     pairs_of_data = np.array(
         [np.concatenate((data[i][1:], data[j][1:], containment_ratios_between_two_bbxes(data[i], data[j]))) for p in

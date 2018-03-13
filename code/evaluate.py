@@ -27,7 +27,7 @@ results_dir = "results"
 errors_percentage = np.array(config.NOISE_VALUES)
 
 constraints_choice = []
-for alg in config.ALGORITHMS:
+for alg in config.EVAL_ALGORITHMS:
     constraints_choice.append("KB_" + alg + "_nr_")
 paths_to_models = ["baseline"]
 labels_of_models = ["baseline"]
@@ -290,7 +290,7 @@ def plot_curves(model_paths, model_names, ltn_performance_pof, ltn_performance_t
         ltn_performance_types[i].append(np.mean(aucs_types[i]))
 
 
-model_names = config.ALGORITHMS
+model_names = config.EVAL_ALGORITHMS
 ltn_performance_pof = [[] for _ in range(len(model_names))]
 ltn_performance_types = [[] for _ in range(len(model_names))]
 for error in errors_percentage:
