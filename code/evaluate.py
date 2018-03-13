@@ -22,9 +22,9 @@ thresholds = np.arange(.00, 1.1, .05)
 models_dir = "models/"
 results_dir = "results"
 
-# errors_percentage = np.array([0.0, 0.1, 0.2, 0.3, 0.4])
-# constraints_choice = ["KB_wc_nr_", "KB_nc_nr_"]
 errors_percentage = np.array(config.NOISE_VALUES)
+data_ratios = np.array(config.RATIO_DATA)
+
 
 constraints_choice = []
 for alg in config.EVAL_ALGORITHMS:
@@ -33,9 +33,10 @@ paths_to_models = ["baseline"]
 labels_of_models = ["baseline"]
 
 for error in errors_percentage:
-    for constraints in constraints_choice:
-        paths_to_models.append(models_dir + constraints + str(error) + ".ckpt")
-        labels_of_models.append("KB_" + constraints + "_" + str(error))
+    for data_r in data_ratios:
+        for constraints in constraints_choice:
+            paths_to_models.append(models_dir + constraints + str(error) + '_dr_' + str(data_r) + ".ckpt")
+            labels_of_models.append("KB_" + constraints + "_" + str(error) + '_dr_' + str(data_r))
 
 # loading test data
 test_data, pairs_of_test_data, types_of_test_data, partOF_of_pairs_of_test_data, pairs_of_bb_idxs_test, pics = get_data(
@@ -245,7 +246,9 @@ def stat(measures, model_name, index_type=None):
                       thresholds], [measures['recall'][model_name][th][0, 0] for th in
                       thresholds]
 
-def plot_curves(model_paths, model_names, ltn_performance_pof, ltn_performance_types, error):
+def plot_curves(model_paths, model_names, ltn_performance_pof, ltn_performance_types, error, data_r):
+    plot_name = 'nr' + str(int(error*100)) + 'dr' + str(int(error*100))
+
     precisions_pof = []
     recalls_pof = []
     for model in model_paths:
@@ -260,7 +263,7 @@ def plot_curves(model_paths, model_names, ltn_performance_pof, ltn_performance_t
         precisions_pof[base_index] = [precisions_pof[base_index][0], precisions_pof[base_index][0]]
 
     aucs_pof = [auc(precisions_pof[i], recalls_pof[i]) for i in range(len(model_names))]
-    plot_prec_rec_curve(precisions_pof, recalls_pof, model_names, str(int(error*100)) + '_part-of', aucs_pof)
+    plot_prec_rec_curve(precisions_pof, recalls_pof, model_names, plot_name + '_part-of', aucs_pof)
 
     precisions_types = [[] for _ in model_names]
     recalls_types = [[] for _ in model_names]
@@ -279,11 +282,11 @@ def plot_curves(model_paths, model_names, ltn_performance_pof, ltn_performance_t
             aucs_types[i].append(auc(precision, recall))
         plot_prec_rec_curve([precisions_types[i][j] for i in range(len(model_names))],
                             [recalls_types[i][j] for i in range(len(model_names))],
-                            model_names, str(int(error * 100)) + '_' + t,
+                            model_names, plot_name + '_' + t,
                             [aucs_types[i][j] for i in range(len(model_names))])
     plot_prec_rec_curve([np.mean(precisions_types[i], axis=0) for i in range(len(model_names))],
                         [np.mean(recalls_types[i], axis=0) for i in range(len(model_names))],
-                        model_names, str(int(error * 100)) + '_types',
+                        model_names, plot_name + '_types',
                         [np.mean(aucs_types[i]) for i in range(len(model_names))])
     for i in range(len(aucs_pof)):
         ltn_performance_pof[i].append(aucs_pof[i])
@@ -294,7 +297,8 @@ model_names = config.EVAL_ALGORITHMS
 ltn_performance_pof = [[] for _ in range(len(model_names))]
 ltn_performance_types = [[] for _ in range(len(model_names))]
 for error in errors_percentage:
-    model_paths = [models_dir + constr + str(error) + ".ckpt" for constr in constraints_choice]
-    plot_curves(model_paths, model_names, ltn_performance_pof, ltn_performance_types, error)
+    for data_r in data_ratios:
+        model_paths = [models_dir + constr + str(error) + "_dr_" + str(data_r) + ".ckpt" for constr in constraints_choice]
+        plot_curves(model_paths, model_names, ltn_performance_pof, ltn_performance_types, error, data_r)
 plot_recovery_chart(errors_percentage, ltn_performance_pof, 'part-of', model_names)
 plot_recovery_chart(errors_percentage, ltn_performance_types, 'types', model_names)
