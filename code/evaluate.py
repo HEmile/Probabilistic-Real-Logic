@@ -22,8 +22,8 @@ thresholds = np.arange(.00, 1.1, .05)
 models_dir = "models/"
 results_dir = "results"
 
-errors_percentage = np.array(config.NOISE_VALUES)
-data_ratios = np.array(config.RATIO_DATA)
+errors_percentage = config.NOISE_VALUES
+data_ratios = config.RATIO_DATA
 
 
 constraints_choice = []
@@ -70,6 +70,7 @@ def auc(precision, recall):
 
 
 def plot_recovery_chart(thresholds, performance, label, model_names, colors=['b', 'g', 'r', 'y']):
+    thresholds = np.array(thresholds)
     width = 0.08 / len(performance)  # the width of the bars
     fig, ax = plt.subplots(figsize=(10.0, 8.0))
     rects = []
@@ -247,7 +248,7 @@ def stat(measures, model_name, index_type=None):
                       thresholds]
 
 def plot_curves(model_paths, model_names, ltn_performance_pof, ltn_performance_types, error, data_r):
-    plot_name = 'nr' + str(int(error*100)) + 'dr' + str(int(error*100))
+    plot_name = 'nr' + str(int(error*100)) + 'dr' + str(int(data_r*100))
 
     precisions_pof = []
     recalls_pof = []
@@ -300,5 +301,5 @@ for error in errors_percentage:
     for data_r in data_ratios:
         model_paths = [models_dir + constr + str(error) + "_dr_" + str(data_r) + ".ckpt" for constr in constraints_choice]
         plot_curves(model_paths, model_names, ltn_performance_pof, ltn_performance_types, error, data_r)
-plot_recovery_chart(errors_percentage, ltn_performance_pof, 'part-of', model_names)
-plot_recovery_chart(errors_percentage, ltn_performance_types, 'types', model_names)
+plot_recovery_chart(data_ratios, ltn_performance_pof, 'part-of', model_names)
+plot_recovery_chart(data_ratios, ltn_performance_types, 'types', model_names)

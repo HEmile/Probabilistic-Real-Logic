@@ -150,7 +150,7 @@ def add_noise_to_data(noise_ratio):
            idxs_of_noisy_positive_examples_of_partOf, idxs_of_noisy_negative_examples_of_partOf
 
 
-def train(KB_full, KB_facts, KB_rules, data, alg='nc', noise_ratio=0.0, data_ratio=config.RATIO_DATA,
+def train(KB_full, KB_facts, KB_rules, data, alg='nc', noise_ratio=0.0, data_ratio=config.RATIO_DATA[0],
           saturation_limit=0.90, lambda_2=config.LAMBDA_2):
     prior_mean = []
     prior_lambda = config.REGULARIZATION

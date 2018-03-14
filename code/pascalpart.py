@@ -59,7 +59,7 @@ def containment_ratios_between_two_bbxes(bb1, bb2):
     return [float(bb_area_intersection) / bb1_area, float(bb_area_intersection) / bb2_area]
 
 
-def get_data(train_or_test_swritch, max_rows=10000000):
+def get_data(train_or_test_swritch, max_rows=10000000, data_ratio=config.RATIO_DATA[0]):
     assert train_or_test_swritch == "train" or train_or_test_swritch == "test"
 
     # Fetching the data from the file system
@@ -105,8 +105,8 @@ def get_data(train_or_test_swritch, max_rows=10000000):
         else:
             pics[data[i][0]] = [i]
 
-    if config.RATIO_DATA < 1:
-        pics_to_remove = random.sample(pics.keys(), int((1-config.RATIO_DATA)*len(pics.keys())))
+    if data_ratio < 1:
+        pics_to_remove = random.sample(pics.keys(), int((1-data_ratio)*len(pics.keys())))
         for i in pics_to_remove:
             del pics[i]
         ids_of_selected_data = [i for i in range(len(data)) if data[i][0] in pics]
