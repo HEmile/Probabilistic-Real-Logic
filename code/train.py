@@ -55,7 +55,6 @@ w1 = {}
 p1 = {}
 pw = {}
 oo = ltn.Domain(number_of_features * 2 + 2, label="same_object_pairs")
-o = ltn.Domain(number_of_features, label="a_generi_object")
 
 w0 = ltn.Domain(number_of_features, label="whole_of_part_whole_pair")
 p0 = ltn.Domain(number_of_features, label="part_of_part_whole_pair")
@@ -83,12 +82,17 @@ clauses_for_wholes_of_parts = [ltn.Clause([ltn.Literal(False, isOfType[p], p1[p]
                                           [ltn.Literal(True, isOfType[w], w1[p]) for w in wholes_of_part[p]],
                                           label="wholes_of_" + p) for p in wholes_of_part.keys()]
 
-clauses_for_disjoint_types = [ltn.Clause([ltn.Literal(False, isOfType[t], o),
-                                          ltn.Literal(False, isOfType[t1], o)], label=t + "_is_not_" + t1) for t in
-                              selected_types for t1 in selected_types if t < t1]
+if not config.USE_MUTUAL_EXCL_PREDICATES:
+    # These are not needed when using the softmax output function. Also speeds up the computation massively
+    # not to have them :)
+    o = ltn.Domain(number_of_features, label="a_generi_object")
 
-clause_for_at_least_one_type = [
-    ltn.Clause([ltn.Literal(True, isOfType[t], o) for t in selected_types], label="an_object_has_at_least_one_type")]
+    clauses_for_disjoint_types = [ltn.Clause([ltn.Literal(False, isOfType[t], o),
+                                              ltn.Literal(False, isOfType[t1], o)], label=t + "_is_not_" + t1) for t in
+                                  selected_types for t1 in selected_types if t < t1]
+
+    clause_for_at_least_one_type = [
+        ltn.Clause([ltn.Literal(True, isOfType[t], o) for t in selected_types], label="an_object_has_at_least_one_type")]
 
 
 # return partof_is_irreflexive + partOf_is_antisymmetric + clauses_for_wholes_of_parts + \
@@ -239,7 +243,8 @@ def get_feed_dict(data, pairs_data, with_constraints=True, with_facts=True):
             pairs_of_train_data[np.random.choice(idxs_of_neg_ex_of_partOf, config.N_NEG_EXAMPLES_PARTOF)]
     # feed data for axioms
     tmp = pairs_data[np.random.choice(range(pairs_data.shape[0]), number_of_pairs_for_axioms)]
-    feed_dict[o.tensor] = tmp[:, :number_of_features]
+    if not config.USE_MUTUAL_EXCL_PREDICATES:
+        feed_dict[o.tensor] = tmp[:, :number_of_features]
 
     if with_constraints:
         for t in selected_types:
@@ -265,7 +270,10 @@ facts = clauses_for_positive_examples_of_types + clauses_for_negative_examples_o
         clause_for_positive_examples_of_partOf + clause_for_negative_examples_of_partOf
 
 rules = partof_is_irreflexive + partOf_is_antisymmetric + clauses_for_wholes_of_parts + \
-        clauses_for_parts_of_wholes + clauses_for_disjoint_types + clause_for_at_least_one_type
+        clauses_for_parts_of_wholes
+
+if not config.USE_MUTUAL_EXCL_PREDICATES:
+    rules += clauses_for_disjoint_types + clause_for_at_least_one_type
 
 # Lists all predicates
 predicates = list(isOfType.values()) + [isPartOf]
