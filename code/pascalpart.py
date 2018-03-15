@@ -31,8 +31,13 @@ pairs_of_objects = ltn.Domain(2 * number_of_features + 2, label="a_pair_of_bound
 
 # Create type predicates acting on the objects domain
 isOfType = {}
-for t in selected_types:
-    isOfType[t] = ltn.Predicate("is_of_type_" + t, objects, config.TYPE_LAYERS)
+if config.USE_MUTUAL_EXCL_PREDICATES:
+    mutExclType = ltn.MutualExclusivePredicates('is_of_type_', len(selected_types), objects, config.MUT_EXCL_LAYERS)
+    for i in range(mutExclType.amt_predicates):
+        isOfType[selected_types[i]] = mutExclType.predicates[i]
+else:
+    for t in selected_types:
+        isOfType[t] = ltn.Predicate("is_of_type_" + t, objects, config.TYPE_LAYERS)
 
 # Create partOf predicate acting on the pairs of objects domain
 isPartOf = ltn.Predicate("is_part_of", pairs_of_objects, config.PART_OF_LAYERS)

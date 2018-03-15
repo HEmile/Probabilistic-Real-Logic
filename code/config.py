@@ -3,7 +3,7 @@
 ############################################
 
 # Amount of iterations used to train the model
-MAX_TRAINING_ITERATIONS = 500
+MAX_TRAINING_ITERATIONS = 1000
 
 # Amount of iterations used to train the informative prior. Only for alg = 'prior'
 MAX_PRIOR_TRAINING_IT = 150
@@ -26,16 +26,16 @@ SATURATION_LIMIT = 0.95
 NOISE_VALUES = [0.]
 
 # The values of Lambda_2 used in the informative prior.
-LAMBDA_2_VALUES = [0.1, 0.01, 1e-3, 1e-4, 1e-5]
+LAMBDA_2_VALUES = [1e-3, 1e-4, 1e-5, 1e-6, 1e-7]
 
 # This is essentially the mini-batch size.
-N_POS_EXAMPLES_TYPES = 250
-N_NEG_EXAMPLES_TYPES = 250
-N_POS_EXAMPLES_PARTOF = 250
-N_NEG_EXAMPLES_PARTOF = 250
-number_of_pairs_for_axioms = 1000
+N_POS_EXAMPLES_TYPES = 50
+N_NEG_EXAMPLES_TYPES = 50
+N_POS_EXAMPLES_PARTOF = 50
+N_NEG_EXAMPLES_PARTOF = 50
+number_of_pairs_for_axioms = 200
 
-RATIO_DATA = [int(1), 0.25, 0.01]
+RATIO_DATA = [1]
 
 # Options: 'all', 'indoor', 'vehicle', 'animal'
 DATASET = 'indoor'
@@ -44,10 +44,14 @@ DATASET = 'indoor'
 # ALGORITHMS = ['prior']
 ALGORITHMS = ['prior', 'nc', 'wc']
 
-EVAL_ALGORITHMS = ['prior_l2_0.001', 'prior_l2_0.0001', 'wc','nc']
+EVAL_ALGORITHMS = ['prior_l2_0.001', 'prior_l2_0.0001', 'prior_l2_0.01', 'wc','nc']
 # EVAL_ALGORITHMS = ['prior_l2_0.001', 'prior_l2_1e-05', 'wc', 'nc']
 
 # LOGIC TENSOR NETWORK SETUP
+USE_MUTUAL_EXCL_PREDICATES = True
+
+MUT_EXCL_LAYERS = 50
+
 DEFAULT_LAYERS = 2
 
 TYPE_LAYERS = 5
@@ -64,6 +68,6 @@ FORALL_AGGREGATOR = "product"
 
 POSITIVE_FACT_PENALTY = 0.
 
-CLAUSE_AGGREGATOR = "log-likelihood"
+CLAUSE_AGGREGATOR = "hmean"
 
 OPTIMIZER = 'rmsprop'

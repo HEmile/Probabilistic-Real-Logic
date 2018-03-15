@@ -40,7 +40,7 @@ for error in errors_percentage:
 
 # loading test data
 test_data, pairs_of_test_data, types_of_test_data, partOF_of_pairs_of_test_data, pairs_of_bb_idxs_test, pics = get_data(
-    "test", max_rows=50000)
+    "test", max_rows=50000, data_ratio=1)
 
 # generating and printing some report on the test data
 number_of_test_data_per_type = Counter(types_of_test_data)
@@ -69,13 +69,15 @@ def auc(precision, recall):
     return np.trapz(np.array(precision)[idx_recall], x=np.array(recall)[idx_recall])
 
 
-def plot_recovery_chart(thresholds, performance, label, model_names, colors=['b', 'g', 'r', 'y']):
+def plot_recovery_chart(thresholds, performance, label, model_names, colors=['b', 'g', 'r', 'y', 'b']):
     thresholds = np.array(thresholds)
+    offsets = np.linspace(0, 1, len(thresholds))
+    print(offsets)
     width = 0.08 / len(performance)  # the width of the bars
     fig, ax = plt.subplots(figsize=(10.0, 8.0))
     rects = []
     for i in range(len(performance)):
-        rects.append(ax.bar(thresholds + (i-len(performance) / 2) * width, performance[i], width, color=colors[i]))
+        rects.append(ax.bar(offsets + (i-len(performance) / 2) * width, performance[i], width, color=colors[i]))
     ax.legend(rects, ['AUC ' + m for m in model_names])
     plt.ylabel('AUC', fontsize=22)
     plt.xlabel('Errors', fontsize=22)
@@ -138,6 +140,8 @@ def confusion_matrix_for_baseline(thresholds, with_partof_axioms=False):
 
 # determining the values of the atoms isOfType[t](bb) and isPartOf(bb1,bb2) for every type t and for every bounding box bb, bb1 and bb2.
 def compute_values_atomic_formulas(path_to_model):
+
+    type_predicates = [isOfType[t] for t in selected_types]
     predicted_types_values_tensor = tf.concat([isOfType[t].tensor() for t in selected_types], 1)
     predicted_partOf_value_tensor = ltn.Literal(True, isPartOf, pairs_of_objects).tensor
     saver = tf.train.Saver()
@@ -301,5 +305,6 @@ for error in errors_percentage:
     for data_r in data_ratios:
         model_paths = [models_dir + constr + str(error) + "_dr_" + str(data_r) + ".ckpt" for constr in constraints_choice]
         plot_curves(model_paths, model_names, ltn_performance_pof, ltn_performance_types, error, data_r)
+print(data_ratios)
 plot_recovery_chart(data_ratios, ltn_performance_pof, 'part-of', model_names)
 plot_recovery_chart(data_ratios, ltn_performance_types, 'types', model_names)

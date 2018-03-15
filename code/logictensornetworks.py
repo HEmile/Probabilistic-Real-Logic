@@ -105,7 +105,6 @@ class Function(Domain):
 
 class Predicate:
     def __init__(self, label, domain, layers=config.DEFAULT_LAYERS):
-        self.label = label
         self.domain = domain
         self.number_of_layers = layers
         self.W = tf.Variable(tf.random_normal([layers,
@@ -133,6 +132,58 @@ class Predicate:
         XV = tf.matmul(X, tf.transpose(self.V))
         gX = tf.matmul(tf.tanh(XWX + XV + self.b), self.u)
         return tf.sigmoid(gX)
+
+
+class _MutExclPredicate(Predicate):
+    def __init__(self, label, domain, tensor, index):
+        self.label = label
+        self.domain = domain
+        self._tensor = tensor
+        self.parameters = []
+        self.index = index
+
+    def tensor(self, domain=None):
+        return self._tensor(domain, self.index)
+
+
+class MutualExclusivePredicates:
+    def __init__(self, label, amt_predicates, domain, layers=config.DEFAULT_LAYERS):
+        self.domain = domain
+        self.number_of_layers = layers
+        self.amt_predicates = amt_predicates
+
+        self.W = tf.Variable(tf.random_normal([layers,
+                                               self.domain.columns,
+                                               self.domain.columns]),
+                             name="W" + label)
+        self.V = tf.Variable(tf.random_normal([layers,
+                                               self.domain.columns]),
+                             name="V" + label)
+        self.b = tf.Variable(-(tf.ones([1, layers])),
+                             name="b" + label)
+        self.U = tf.Variable(tf.ones([layers, amt_predicates]),
+                             name="u" + label)
+        self.parameters = [self.W, self.V, self.b, self.U]
+        # Contains a tensor for each unique domain
+        self.tensors = {}
+        self.predicates = []
+        for i in range(amt_predicates):
+            self.predicates.append(_MutExclPredicate(label + str(i), self.domain, self.tensor, i))
+
+    def tensor(self, domain, output_index):
+        if domain is None:
+            domain = self.domain
+        if domain in self.tensors:
+            softmax_layer = self.tensors[domain]
+        else:
+            X = domain.tensor
+            XW = tf.matmul(tf.tile(tf.expand_dims(X, 0), [self.number_of_layers, 1, 1]), self.W)
+            XWX = tf.squeeze(tf.matmul(tf.expand_dims(X, 1), tf.transpose(XW, [1, 2, 0])))
+            XV = tf.matmul(X, tf.transpose(self.V))
+            gX = tf.matmul(tf.nn.relu(XWX + XV + self.b), self.U)
+            softmax_layer = tf.nn.softmax(gX)
+            self.tensors[domain] = softmax_layer
+        return tf.reshape(softmax_layer[:, output_index], [-1, 1])
 
 
 class Literal:
@@ -164,7 +215,7 @@ class Clause:
 
 class KnowledgeBase:
     # Note: This does not currently support functions
-    def __init__(self, predicates, clauses, save_path=""):
+    def __init__(self, predicates, mutExPreds, clauses, kbLabel, save_path=""):
         self.clauses = clauses
         if not self.clauses:
             self.tensor = tf.constant(1.0)
@@ -188,10 +239,14 @@ class KnowledgeBase:
                     self.tensor = tf.reduce_mean(clauses_value_tensor)
                 else:
                     self.tensor = tf.reduce_mean(tf.log(clauses_value_tensor))
-
+        self.tensor = tf.reshape(self.tensor, shape=(), name=kbLabel + 'loss')
+        tf.summary.scalar(kbLabel + 'loss', self.tensor)
         self.parameters = [param
                            for pred in predicates
                            for param in pred.parameters]
+        self.parameters += [param
+                            for mutPred in mutExPreds
+                            for param in mutPred.parameters]
         self.omega = tf.concat([tf.reshape(par, [-1]) for par in self.parameters], 0)
         self.omega = tf.reshape(self.omega, [-1])  # Completely flatten the parameter array
         self.num_params = tf.shape(self.omega)

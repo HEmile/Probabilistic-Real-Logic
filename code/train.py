@@ -149,73 +149,71 @@ def add_noise_to_data(noise_ratio):
     return idxs_of_noisy_positive_examples_of_types, idxs_of_noisy_negative_examples_of_types, \
            idxs_of_noisy_positive_examples_of_partOf, idxs_of_noisy_negative_examples_of_partOf
 
+def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lambda, sess, data, kb_label):
+    train_writer = tf.summary.FileWriter('logging/' + kb_label + '/train', sess.graph)
 
-def train(KB_full, KB_facts, KB_rules, data, alg='nc', noise_ratio=0.0, data_ratio=config.RATIO_DATA[0],
-          saturation_limit=0.90, lambda_2=config.LAMBDA_2):
-    prior_mean = []
+    train_kb = True
+    for i in range(iterations):
+        ti = time.time()
+        if i % config.FREQ_OF_FEED_DICT_GENERATION == 0:
+            train_kb = True
+            feed_dict = get_feed_dict(data, pairs_of_train_data,
+                                      with_constraints=with_constraints, with_facts=with_facts)
+            feed_dict[KB.prior_mean] = prior_mean
+            feed_dict[KB.prior_lambda] = prior_lambda
+        # if i + 1 % config.FREQ_OF_SAVE == 0:
+        #     print('Saving the model to a file')
+        #     KB.save(sess, kb_label)
+        if train_kb:
+            sat_level, normal_loss, reg_loss = KB.train(sess, feed_dict)
+            if np.isnan(sat_level):
+                train_kb = False
+            if normal_loss < 0:  # Using log-likelihood aggregation
+                sat_level = np.exp(-sat_level)
+            if sat_level >= config.SATURATION_LIMIT:
+                train_kb = False
+        if i % config.FREQ_OF_PRINT == 0:
+            iter_time = time.time() - ti
+            feed_dict = get_feed_dict(data, pairs_of_train_data)
+            feed_dict[KB.prior_mean] = prior_mean
+            feed_dict[KB.prior_lambda] = prior_lambda
+
+            summary = sess.run(summary_merge, feed_dict)
+            train_writer.add_summary(summary, i)
+
+            # feed_dict = get_feed_dict(data, pairs_of_train_data, with_constraints=False)
+            # feed_dict[KB.prior_mean] = prior_mean
+            # feed_dict[KB.prior_lambda] = prior_lambda
+            # fact_loss = sess.run(KB_facts.tensor, feed_dict)
+
+            print(i, 'Sat level', str(sat_level), 'loss', normal_loss, 'regularization', reg_loss, 'iteration time',
+                  iter_time)
+    return feed_dict
+
+def train(KB_full, KB_facts, data, alg='nc', noise_ratio=0.0, data_ratio=config.RATIO_DATA[0],
+          lambda_2=config.LAMBDA_2, prior_mean=None):
     prior_lambda = config.REGULARIZATION
 
     # defining the label of the background knowledge
     kb_label = "KB_" + alg + "_nr_" + str(noise_ratio) + "_dr_" + str(data_ratio)
 
-    def train_fn(with_facts, with_constraints, iterations):
-        train_kb = True
-        for i in range(iterations):
-            ti = time.time()
-            if i % config.FREQ_OF_FEED_DICT_GENERATION == 0:
-                train_kb = True
-                feed_dict = get_feed_dict(data, pairs_of_train_data,
-                                          with_constraints=with_constraints, with_facts=with_facts)
-                feed_dict[KB.prior_mean] = prior_mean
-                feed_dict[KB.prior_lambda] = prior_lambda
-            if i + 1 % config.FREQ_OF_SAVE == 0:
-                print('Saving the model to a file')
-                KB.save(sess, kb_label)
-            if train_kb:
-                sat_level, normal_loss, reg_loss = KB.train(sess, feed_dict)
-                if np.isnan(sat_level):
-                    train_kb = False
-                if normal_loss < 0:  # Using log-likelihood aggregation
-                    sat_level = np.exp(-sat_level)
-                if sat_level >= saturation_limit:
-                    train_kb = False
-            if i % config.FREQ_OF_PRINT == 0:
-                print(i, 'Sat level', str(sat_level), 'loss', normal_loss, 'regularization', reg_loss, 'iteration time',
-                      time.time() - ti)
-        return feed_dict
-
-    # Make sure the graph is cleaned up after each experiment run to reduce memory usage.
     if alg == 'prior':
         kb_label = "KB_" + alg + '_l2_' + str(lambda_2) + "_nr_" + str(noise_ratio) + "_dr_" + str(data_ratio)
-        KB = KB_rules
-
-        # start training
-        init = tf.global_variables_initializer()
-        with tf.Session(config=tf_config) as sess:
-            sess.run(init)
-            prior_mean = np.zeros(sess.run(KB.num_params, {}))
-
-            feed_dict = train_fn(with_facts=False, with_constraints=True, iterations=config.MAX_PRIOR_TRAINING_IT)
-
-            # Create the parameters for the informative prior
-            prior_mean = sess.run(KB.omega, feed_dict)
-            prior_lambda = lambda_2
+        prior_lambda = lambda_2
 
     KB = KB_full if alg == 'wc' else KB_facts
+    with tf.Session(config=tf_config) as sess:
+        sess.run(tf.global_variables_initializer())
+        # start training
+        if prior_mean is None:
+            prior_mean = np.zeros(sess.run(KB.num_params, {}))
 
-    # start training
-    init = tf.global_variables_initializer()
-    sess = tf.Session(config=tf_config)
-    sess.run(init)
-    if len(prior_mean) == 0:
-        prior_mean = np.zeros(sess.run(KB.num_params, {}))
+        train_fn(with_facts=True, with_constraints=alg == 'wc', iterations=config.MAX_TRAINING_ITERATIONS,
+                KB=KB, prior_mean=prior_mean, prior_lambda=prior_lambda,
+                sess=sess, data=data, kb_label=kb_label)
 
-    train_fn(with_facts=True, with_constraints=alg == 'wc', iterations=config.MAX_TRAINING_ITERATIONS)
-
-    KB.save(sess, kb_label)
-    print("end of training")
-    sess.close()
-
+        KB.save(sess, kb_label)
+        print("end of training")
 
 def get_feed_dict(data, pairs_data, with_constraints=True, with_facts=True):
     # print("selecting new training data")
@@ -271,17 +269,35 @@ rules = partof_is_irreflexive + partOf_is_antisymmetric + clauses_for_wholes_of_
 
 # Lists all predicates
 predicates = list(isOfType.values()) + [isPartOf]
+mutExPredicates = [mutExclType] if config.USE_MUTUAL_EXCL_PREDICATES else []
 
 # Create the different knowledge bases.
 print('Defining knowledge bases')
-KB_full = ltn.KnowledgeBase(predicates, facts + rules, "models/")
-KB_facts = ltn.KnowledgeBase(predicates, facts, "models/")
-KB_rules = ltn.KnowledgeBase(predicates, rules, "models/")
+KB_full = ltn.KnowledgeBase(predicates, mutExPredicates, facts + rules, "full", "models/")
+KB_facts = ltn.KnowledgeBase(predicates, mutExPredicates, facts, "facts", "models/")
+KB_rules = ltn.KnowledgeBase(predicates, mutExPredicates, rules, "rules", "models/")
+
+# The summary contains the loss tensors for the three Knowledge Bases defined up here.
+summary_merge = tf.summary.merge_all()
 
 for nr in config.NOISE_VALUES:
     data = add_noise_to_data(nr)
+
+    # Compute the prior mean for the current dataset
+    if 'prior' in config.ALGORITHMS:
+        with tf.Session(config=tf_config) as sess:
+            sess.run(tf.global_variables_initializer())
+            prior_mean = np.zeros(sess.run(KB_rules.num_params, {}))
+
+            feed_dict = train_fn(with_facts=False, with_constraints=True, iterations=config.MAX_PRIOR_TRAINING_IT,
+                                 KB=KB_rules, prior_mean=prior_mean, prior_lambda=config.REGULARIZATION,
+                                 sess=sess, data=data, kb_label='prior_training')
+
+            # Create the parameters for the informative prior
+            prior_mean = sess.run(KB_rules.omega, feed_dict)
+
     for alg in config.ALGORITHMS:
         lambda_2s = config.LAMBDA_2_VALUES if alg == 'prior' else [config.LAMBDA_2]
         for lambda_2 in lambda_2s:
-            train(KB_full, KB_facts, KB_rules, data, alg=alg, noise_ratio=nr,
-                  saturation_limit=config.SATURATION_LIMIT, lambda_2=lambda_2)
+            train(KB_full, KB_facts, data, alg=alg, noise_ratio=nr, lambda_2=lambda_2,
+                  prior_mean=prior_mean if alg == 'prior' else None)
