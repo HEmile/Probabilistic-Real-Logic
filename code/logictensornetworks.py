@@ -130,7 +130,7 @@ class Predicate:
     # that takes as input the domain of the predicate and computes the value of
     # the predicate for all elements in the domain.
     def tensor(self, domain=None):
-        with tf.variable_scope('predicate_' + self.label) as sc:
+        with tf.variable_scope('predicate_' + self.label + domain.label) as sc:
             if domain is None:
                 domain = self.domain
             X = domain.tensor
@@ -185,7 +185,7 @@ class MutualExclusivePredicates:
         if domain in self.tensors:
             softmax_layer = self.tensors[domain]
         else:
-            with tf.variable_scope('MutualExclusivePredicate_' + self.label) as sc:
+            with tf.variable_scope('MutualExclusivePredicate_' + self.label + domain.label) as sc:
                 X = domain.tensor
                 XW = tf.matmul(tf.tile(tf.expand_dims(X, 0), [self.number_of_layers, 1, 1]), self.W)
                 XWX = tf.squeeze(tf.matmul(tf.expand_dims(X, 1), tf.transpose(XW, [1, 2, 0])))
@@ -220,7 +220,7 @@ class Clause:
             self.weight = weight
             self.label = label
             self.literals = literals
-            self.tensor = disjunction_of_literals(self.literals, label=label)
+            self.tensor = tf.reshape(disjunction_of_literals(self.literals, label=label), (), name='satisfaction')
             self.predicates = set([lit.predicate for lit in self.literals])
 
 
@@ -232,7 +232,7 @@ class KnowledgeBase:
             if not self.clauses:
                 self.tensor = tf.constant(1.0)
             else:
-                clauses_value_tensor = tf.concat([cl.tensor for cl in clauses], 0)
+                clauses_value_tensor = tf.stack([cl.tensor for cl in clauses], 0)
                 if config.CLAUSE_AGGREGATOR == "min":
                     print("clauses aggregator is min")
                     self.tensor = tf.reduce_min(clauses_value_tensor)
@@ -252,7 +252,8 @@ class KnowledgeBase:
                     else:
                         self.tensor = tf.reduce_mean(tf.log(clauses_value_tensor))
             self.tensor = tf.reshape(self.tensor, shape=(), name=kbLabel + 'loss')
-            tf.summary.scalar(kbLabel + 'loss', self.tensor)
+            tf.summary.scalar(kbLabel + 'loss', self.tensor, collections=['train'])
+
             self.parameters = [param
                                for pred in predicates
                                for param in pred.parameters]
@@ -265,6 +266,8 @@ class KnowledgeBase:
             self.prior_mean = tf.placeholder("float", shape=[None,], name="prior_mean")
             self.prior_lambda = tf.placeholder("float", shape=(), name='prior_lambda')
             self.L2_regular = tf.reduce_sum(tf.square(self.omega - self.prior_mean)) * self.prior_lambda
+
+            tf.summary.scalar(kbLabel + 'regularization', self.L2_regular, collections=['train'])
 
             if config.POSITIVE_FACT_PENALTY != 0:
                 self.loss = self.L2_regular + \

@@ -1,12 +1,13 @@
+import numpy as np
 ############################################
 # TRAINING
 ############################################
 
 # Amount of iterations used to train the model
-MAX_TRAINING_ITERATIONS = 1000
+MAX_TRAINING_ITERATIONS = 5000
 
 # Amount of iterations used to train the informative prior. Only for alg = 'prior'
-MAX_PRIOR_TRAINING_IT = 150
+MAX_PRIOR_TRAINING_IT = 140
 
 # How often to change the data that's used to compute the gradient. 1 is recommended for pure stochastic descent
 FREQ_OF_FEED_DICT_GENERATION = 1
@@ -17,6 +18,8 @@ FREQ_OF_SAVE = 1000
 # How often to print the current training loss
 FREQ_OF_PRINT = 20
 
+FREQ_OF_TEST = 40
+
 # At what saturation (probability of knowledge base) to switch the feed dict. If a new feed dict is fed every iteration,
 # this does nothing.
 SATURATION_LIMIT = 0.95
@@ -26,7 +29,9 @@ SATURATION_LIMIT = 0.95
 NOISE_VALUES = [0.]
 
 # The values of Lambda_2 used in the informative prior.
-LAMBDA_2_VALUES = [1e-3, 1e-4, 1e-5, 1e-6, 1e-7]
+# LAMBDA_2_VALUES = [1e-3, 1e-4, 1e-5, 1e-6, 1e-7]
+# LAMBDA_2_VALUES = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7]
+LAMBDA_2_VALUES = [1e-6]
 
 # This is essentially the mini-batch size.
 N_POS_EXAMPLES_TYPES = 50
@@ -35,19 +40,19 @@ N_POS_EXAMPLES_PARTOF = 50
 N_NEG_EXAMPLES_PARTOF = 50
 number_of_pairs_for_axioms = 200
 
-RATIO_DATA = [1]
+NUMBER_PAIRS_AXIOMS_TESTING = 2000
+
+RATIO_DATA = [0.99]
 
 # Options: 'all', 'indoor', 'vehicle', 'animal'
 DATASET = 'indoor'
 
 # List. Return [True, False] to create models for both training with and without constraints.
-# ALGORITHMS = ['prior']
 ALGORITHMS = ['prior', 'nc', 'wc']
 
-EVAL_ALGORITHMS = ['prior_l2_0.001', 'prior_l2_0.0001', 'prior_l2_0.01', 'wc','nc']
-# EVAL_ALGORITHMS = ['prior_l2_0.001', 'prior_l2_1e-05', 'wc', 'nc']
-
+####################################
 # LOGIC TENSOR NETWORK SETUP
+####################################
 USE_MUTUAL_EXCL_PREDICATES = True
 
 MUT_EXCL_LAYERS = 50
@@ -58,16 +63,23 @@ TYPE_LAYERS = 5
 
 PART_OF_LAYERS = 2
 
-REGULARIZATION = 1e-6
+REGULARIZATION = 1e-8
 
 LAMBDA_2 = 1e-7
 
 TNORM = "product"
 
-FORALL_AGGREGATOR = "product"
+FORALL_AGGREGATOR = "hmean"
 
 POSITIVE_FACT_PENALTY = 0.
 
-CLAUSE_AGGREGATOR = "hmean"
+CLAUSE_AGGREGATOR = "log-likelihood"
 
 OPTIMIZER = 'rmsprop'
+
+#################
+# EVALUATION
+#################
+THRESHOLDS = np.arange(.00, 1.1, .05)
+
+EVAL_ALGORITHMS = ['prior_l2_0.001', 'prior_l2_0.0001', 'prior_l2_1e-06', 'wc','nc']

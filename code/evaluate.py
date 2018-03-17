@@ -8,47 +8,6 @@ import config
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-matplotlib.rcParams['xtick.labelsize'] = 20
-matplotlib.rcParams['ytick.labelsize'] = 20
-matplotlib.rcParams['legend.fontsize'] = 18
-
-np.set_printoptions(precision=2)
-np.set_printoptions(threshold=np.inf)
-
-# swith between GPU and CPU
-tf_config = tf.ConfigProto(device_count={'GPU': 1})
-
-thresholds = np.arange(.00, 1.1, .05)
-models_dir = "models/"
-results_dir = "results"
-
-errors_percentage = config.NOISE_VALUES
-data_ratios = config.RATIO_DATA
-
-
-constraints_choice = []
-for alg in config.EVAL_ALGORITHMS:
-    constraints_choice.append("KB_" + alg + "_nr_")
-paths_to_models = ["baseline"]
-labels_of_models = ["baseline"]
-
-for error in errors_percentage:
-    for data_r in data_ratios:
-        for constraints in constraints_choice:
-            paths_to_models.append(models_dir + constraints + str(error) + '_dr_' + str(data_r) + ".ckpt")
-            labels_of_models.append("KB_" + constraints + "_" + str(error) + '_dr_' + str(data_r))
-
-# loading test data
-test_data, pairs_of_test_data, types_of_test_data, partOF_of_pairs_of_test_data, pairs_of_bb_idxs_test, pics = get_data(
-    "test", max_rows=50000, data_ratio=1)
-
-# generating and printing some report on the test data
-number_of_test_data_per_type = Counter(types_of_test_data)
-print(number_of_test_data_per_type)
-type_cardinality_array = np.array([number_of_test_data_per_type[t] for t in selected_types])
-idxs_for_selected_types = np.concatenate([np.where(types == st)[0] for st in selected_types])
-print(idxs_for_selected_types)
-
 
 # generating new features for box overlapping
 def partof_baseline_test(bb_pair_idx, wholes_of_part, threshold=0.7, with_partof_axioms=False):
@@ -140,8 +99,6 @@ def confusion_matrix_for_baseline(thresholds, with_partof_axioms=False):
 
 # determining the values of the atoms isOfType[t](bb) and isPartOf(bb1,bb2) for every type t and for every bounding box bb, bb1 and bb2.
 def compute_values_atomic_formulas(path_to_model):
-
-    type_predicates = [isOfType[t] for t in selected_types]
     predicted_types_values_tensor = tf.concat([isOfType[t].tensor() for t in selected_types], 1)
     predicted_partOf_value_tensor = ltn.Literal(True, isPartOf, pairs_of_objects).tensor
     saver = tf.train.Saver()
@@ -152,24 +109,10 @@ def compute_values_atomic_formulas(path_to_model):
     sess.close()
     return values_of_types, values_of_partOf
 
-
-# computing confusion matrixes for the prediction of a model
-def confusion_matrixes_of_model(path_to_model, thresholds):
-    print("")
-    print("computing confusion matrix for", path_to_model)
-    global test_data, types_of_test_data, partOF_of_pairs_of_test_data, bb_idxs_pairs
-    values_of_types, values_of_partOf = compute_values_atomic_formulas(path_to_model)
-    confusion_matrix_for_types = {}
+def compute_confusion_matrix_pof(thresholds, values_of_partOf, pairs_of_test_data, partOF_of_pairs_of_test_data):
     confusion_matrix_for_pof = {}
-    # pdb.set_trace()
+
     for th in thresholds:
-        print(th, " ",)
-        confusion_matrix_for_types[th] = np.matrix([[0.0] * len(selected_types)] * len(selected_types))
-        for bb_idx in range(len(test_data)):
-            for st_idx in range(len(selected_types)):
-                if values_of_types[bb_idx][st_idx] >= th:
-                    confusion_matrix_for_types[th][
-                        st_idx, np.where(selected_types == types_of_test_data[bb_idx])[0][0]] += 1
         confusion_matrix_for_pof[th] = np.matrix([[0.0, 0.0], [0.0, 0.0]])
         for bb_pair_idx in range(len(pairs_of_test_data)):
             if values_of_partOf[bb_pair_idx] >= th:
@@ -182,57 +125,38 @@ def confusion_matrixes_of_model(path_to_model, thresholds):
                     confusion_matrix_for_pof[th][1, 0] += 1
                 else:
                     confusion_matrix_for_pof[th][1, 1] += 1
+    return confusion_matrix_for_pof
 
-    return confusion_matrix_for_types, confusion_matrix_for_pof
-
-
-measure_per_type = {}
-measure_per_pof = {}
-
-measures = ["prec", "recall", "f1"]
-
-for measure in measures:
-    measure_per_pof[measure] = {}
-    measure_per_type[measure] = {}
-
-for path_to_model in paths_to_models:
-    if path_to_model == "baseline":
-        cm_types, cm_pof = confusion_matrix_for_baseline(thresholds, with_partof_axioms=False)
-    else:
-        cm_types, cm_pof = confusion_matrixes_of_model(path_to_model, thresholds)
-    for measure in measures:
-        measure_per_type[measure][path_to_model] = {}
-        measure_per_pof[measure][path_to_model] = {}
+# computing confusion matrixes for the prediction of a model
+def confusion_matrixes_of_model(path_to_model, thresholds):
+    print("")
+    print("computing confusion matrix for", path_to_model)
+    global test_data, types_of_test_data, partOF_of_pairs_of_test_data, bb_idxs_pairs
+    values_of_types, values_of_partOf = compute_values_atomic_formulas(path_to_model)
+    confusion_matrix_for_types = {}
+    # pdb.set_trace()
     for th in thresholds:
-        measure_per_type["prec"][path_to_model][th] = precision(cm_types[th])
-        measure_per_type["recall"][path_to_model][th] = recall(cm_types[th], gold_array=type_cardinality_array)
-        measure_per_type["f1"][path_to_model][th] = f1(measure_per_type["prec"][path_to_model][th],
-                                                       measure_per_type["recall"][path_to_model][th])
-        measure_per_pof["prec"][path_to_model][th] = precision(cm_pof[th])
-        measure_per_pof["recall"][path_to_model][th] = recall(cm_pof[th])
-        measure_per_pof["f1"][path_to_model][th] = f1(measure_per_pof["prec"][path_to_model][th],
-                                                      measure_per_pof["recall"][path_to_model][th])
+        print(th, " ",)
+        confusion_matrix_for_types[th] = np.matrix([[0.0] * len(selected_types)] * len(selected_types))
+        for bb_idx in range(len(test_data)):
+            for st_idx in range(len(selected_types)):
+                if values_of_types[bb_idx][st_idx] >= th:
+                    confusion_matrix_for_types[th][
+                        st_idx, np.where(selected_types == types_of_test_data[bb_idx])[0][0]] += 1
 
-print("")
-print("writing report in file " + os.path.join(results_dir, "report.csv"))
-with open(os.path.join(results_dir, "report.csv"), "w") as report:
-    writer = csv.writer(report, delimiter=';')
-    writer.writerow(
-        ["threshold", ""] + [y for x in [[th] * len(measures) * len(paths_to_models) for th in thresholds] for y in x])
-    writer.writerow(
-        ["measure", ""] + [y for x in [[meas] * len(paths_to_models) for meas in measures] for y in x] * len(
-            thresholds))
-    writer.writerow(["models", ""] + labels_of_models * len(measures) * len(thresholds))
-    writer.writerow(
-        ["part of", ""] + [measure_per_pof[measure][mod][th][0, 0] for th in thresholds for measure in measures for mod
-                           in paths_to_models])
-    writer.writerow(
-        ["average x types", ""] + [measure_per_type[measure][mod][th].mean() for th in thresholds for measure in
-                                   measures for mod in paths_to_models])
-    for t in selected_types:
-        writer.writerow([t, number_of_test_data_per_type[t]] + [
-            measure_per_type[measure][mod][th][0, np.where(selected_types == t)[0][0]] for th in thresholds for measure
-            in measures for mod in paths_to_models])
+    return confusion_matrix_for_types, compute_confusion_matrix_pof(thresholds, values_of_partOf,
+                                                                    pairs_of_test_data, partOF_of_pairs_of_test_data)
+
+def compute_measures(cm, path, cm_measures):
+    for measure in measures:
+        if measure not in cm_measures:
+            cm_measures[measure] = {}
+        cm_measures[measure][path] = {}
+    for th in thresholds:
+        cm_measures["prec"][path][th] = precision(cm[th])
+        cm_measures["recall"][path][th] = recall(cm[th])
+        cm_measures["f1"][path][th] = f1(cm_measures["prec"][path][th],
+                                                  cm_measures["recall"][path][th])
 
 def adjust_prec(precision):
     prec = precision
@@ -298,13 +222,98 @@ def plot_curves(model_paths, model_names, ltn_performance_pof, ltn_performance_t
         ltn_performance_types[i].append(np.mean(aucs_types[i]))
 
 
-model_names = config.EVAL_ALGORITHMS
-ltn_performance_pof = [[] for _ in range(len(model_names))]
-ltn_performance_types = [[] for _ in range(len(model_names))]
-for error in errors_percentage:
-    for data_r in data_ratios:
-        model_paths = [models_dir + constr + str(error) + "_dr_" + str(data_r) + ".ckpt" for constr in constraints_choice]
-        plot_curves(model_paths, model_names, ltn_performance_pof, ltn_performance_types, error, data_r)
-print(data_ratios)
-plot_recovery_chart(data_ratios, ltn_performance_pof, 'part-of', model_names)
-plot_recovery_chart(data_ratios, ltn_performance_types, 'types', model_names)
+measures = ["prec", "recall", "f1"]
+thresholds = config.THRESHOLDS
+
+if __name__ == '__main__':
+    matplotlib.rcParams['xtick.labelsize'] = 20
+    matplotlib.rcParams['ytick.labelsize'] = 20
+    matplotlib.rcParams['legend.fontsize'] = 18
+
+    np.set_printoptions(precision=2)
+    np.set_printoptions(threshold=np.inf)
+
+    # swith between GPU and CPU
+    tf_config = tf.ConfigProto(device_count={'GPU': 1})
+
+    models_dir = "models/"
+    results_dir = "results"
+
+    errors_percentage = config.NOISE_VALUES
+    data_ratios = config.RATIO_DATA
+
+    constraints_choice = []
+    for alg in config.EVAL_ALGORITHMS:
+        constraints_choice.append("KB_" + alg + "_nr_")
+    paths_to_models = ["baseline"]
+    labels_of_models = ["baseline"]
+
+    for error in errors_percentage:
+        for data_r in data_ratios:
+            for constraints in constraints_choice:
+                paths_to_models.append(models_dir + constraints + str(error) + '_dr_' + str(data_r) + ".ckpt")
+                labels_of_models.append("KB_" + constraints + "_" + str(error) + '_dr_' + str(data_r))
+
+    # loading test data
+    test_data, pairs_of_test_data, types_of_test_data, partOF_of_pairs_of_test_data, pairs_of_bb_idxs_test, pics = get_data(
+        "test", max_rows=50000, data_ratio=1)
+
+    # generating and printing some report on the test data
+    number_of_test_data_per_type = Counter(types_of_test_data)
+    print(number_of_test_data_per_type)
+    type_cardinality_array = np.array([number_of_test_data_per_type[t] for t in selected_types])
+    idxs_for_selected_types = np.concatenate([np.where(types == st)[0] for st in selected_types])
+    print(idxs_for_selected_types)
+
+    measure_per_type = {}
+    measure_per_pof = {}
+
+    for measure in measures:
+        measure_per_pof[measure] = {}
+        measure_per_type[measure] = {}
+
+    for path_to_model in paths_to_models:
+        if path_to_model == "baseline":
+            cm_types, cm_pof = confusion_matrix_for_baseline(thresholds, with_partof_axioms=False)
+        else:
+            cm_types, cm_pof = confusion_matrixes_of_model(path_to_model, thresholds)
+        for measure in measures:
+            measure_per_type[measure][path_to_model] = {}
+        for th in thresholds:
+            measure_per_type["prec"][path_to_model][th] = precision(cm_types[th])
+            measure_per_type["recall"][path_to_model][th] = recall(cm_types[th], gold_array=type_cardinality_array)
+            measure_per_type["f1"][path_to_model][th] = f1(measure_per_type["prec"][path_to_model][th],
+                                                           measure_per_type["recall"][path_to_model][th])
+        compute_measures(cm_pof, path_to_model, measure_per_pof)
+
+    print("")
+    print("writing report in file " + os.path.join(results_dir, "report.csv"))
+    with open(os.path.join(results_dir, "report.csv"), "w") as report:
+        writer = csv.writer(report, delimiter=';')
+        writer.writerow(
+            ["threshold", ""] + [y for x in [[th] * len(measures) * len(paths_to_models) for th in thresholds] for y in x])
+        writer.writerow(
+            ["measure", ""] + [y for x in [[meas] * len(paths_to_models) for meas in measures] for y in x] * len(
+                thresholds))
+        writer.writerow(["models", ""] + labels_of_models * len(measures) * len(thresholds))
+        writer.writerow(
+            ["part of", ""] + [measure_per_pof[measure][mod][th][0, 0] for th in thresholds for measure in measures for mod
+                               in paths_to_models])
+        writer.writerow(
+            ["average x types", ""] + [measure_per_type[measure][mod][th].mean() for th in thresholds for measure in
+                                       measures for mod in paths_to_models])
+        for t in selected_types:
+            writer.writerow([t, number_of_test_data_per_type[t]] + [
+                measure_per_type[measure][mod][th][0, np.where(selected_types == t)[0][0]] for th in thresholds for measure
+                in measures for mod in paths_to_models])
+
+    model_names = config.EVAL_ALGORITHMS
+    ltn_performance_pof = [[] for _ in range(len(model_names))]
+    ltn_performance_types = [[] for _ in range(len(model_names))]
+    for error in errors_percentage:
+        for data_r in data_ratios:
+            model_paths = [models_dir + constr + str(error) + "_dr_" + str(data_r) + ".ckpt" for constr in constraints_choice]
+            plot_curves(model_paths, model_names, ltn_performance_pof, ltn_performance_types, error, data_r)
+    print(data_ratios)
+    plot_recovery_chart(data_ratios, ltn_performance_pof, 'part-of', model_names)
+    plot_recovery_chart(data_ratios, ltn_performance_types, 'types', model_names)

@@ -4,14 +4,18 @@ import random, os, pdb
 import logictensornetworks as ltn
 import config
 import time
+from evaluate import compute_confusion_matrix_pof, compute_measures, stat, adjust_prec, auc
 
 # swith between GPU and CPU
 tf_config = tf.ConfigProto(device_count={'GPU': 1})
 
-number_of_pairs_for_axioms = 1000
-
+# Loading training data
 train_data, pairs_of_train_data, types_of_train_data, partOf_of_pairs_of_train_data, _, _ = get_data("train",
                                                                                                      max_rows=1000000000)
+
+# loading test data
+test_data, pairs_of_test_data, types_of_test_data, partOF_of_pairs_of_test_data, pairs_of_bb_idxs_test, pics = get_data(
+    "test", max_rows=50000, data_ratio=1)
 
 # computing positive and negative examples for types and partof
 
@@ -155,6 +159,7 @@ def add_noise_to_data(noise_ratio):
 
 def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lambda, sess, data, kb_label):
     train_writer = tf.summary.FileWriter('logging/' + kb_label + '/train', sess.graph)
+    test_writer = tf.summary.FileWriter('logging/' + kb_label + '/test', sess.graph)
 
     train_kb = True
     for i in range(iterations):
@@ -165,9 +170,6 @@ def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lam
                                       with_constraints=with_constraints, with_facts=with_facts)
             feed_dict[KB.prior_mean] = prior_mean
             feed_dict[KB.prior_lambda] = prior_lambda
-        # if i + 1 % config.FREQ_OF_SAVE == 0:
-        #     print('Saving the model to a file')
-        #     KB.save(sess, kb_label)
         if train_kb:
             sat_level, normal_loss, reg_loss = KB.train(sess, feed_dict)
             if np.isnan(sat_level):
@@ -179,30 +181,69 @@ def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lam
         if i % config.FREQ_OF_PRINT == 0:
             iter_time = time.time() - ti
             feed_dict = get_feed_dict(data, pairs_of_train_data)
-            feed_dict[KB.prior_mean] = prior_mean
-            feed_dict[KB.prior_lambda] = prior_lambda
+            for kb in [KB_facts, KB_rules, KB_full]:
+                feed_dict[kb.prior_mean] = prior_mean
+                feed_dict[kb.prior_lambda] = prior_lambda
 
             summary = sess.run(summary_merge, feed_dict)
             train_writer.add_summary(summary, i)
 
-            # feed_dict = get_feed_dict(data, pairs_of_train_data, with_constraints=False)
-            # feed_dict[KB.prior_mean] = prior_mean
-            # feed_dict[KB.prior_lambda] = prior_lambda
-            # fact_loss = sess.run(KB_facts.tensor, feed_dict)
-
             print(i, 'Sat level', str(sat_level), 'loss', normal_loss, 'regularization', reg_loss, 'iteration time',
                   iter_time)
+        if i % config.FREQ_OF_TEST == 0:
+            predicted_types_values_tensor = tf.concat([isOfType[t].tensor() for t in selected_types], 1)
+            predicted_partOf_value_tensor = ltn.Literal(True, isPartOf, pairs_of_objects).tensor
+            # values_of_types = sess.run(predicted_types_values_tensor, {objects.tensor: test_data[:, 1:]})
+            # values_of_partOf = sess.run(predicted_partOf_value_tensor, {pairs_of_objects.tensor: pairs_of_test_data})
+
+            feed_dict = {}
+            feed_dict[objects.tensor] = test_data[:, 1:]
+            feed_dict[pairs_of_objects.tensor] = pairs_of_test_data
+
+            feed_dict_rules(feed_dict, pairs_of_test_data[np.random.choice(range(pairs_of_test_data.shape[0]),
+                                                                           config.NUMBER_PAIRS_AXIOMS_TESTING)],)
+
+            values_of_types, values_of_partOf, summary_r = sess.run([predicted_types_values_tensor,
+                                                                   predicted_partOf_value_tensor,
+                                                                   rules_summary], feed_dict)
+
+            cm = compute_confusion_matrix_pof(config.THRESHOLDS, values_of_partOf,
+                                              pairs_of_test_data, partOF_of_pairs_of_test_data)
+            measures = {}
+            compute_measures(cm, 'test', measures)
+            precision, recall = stat(measures, 'test')
+            precision = adjust_prec(precision)
+            auc_pof = auc(precision, recall)
+
+            max_type_labels = np.argmax(values_of_types, 1)
+            max_type_labels = selected_types[max_type_labels]
+            correct = np.where(max_type_labels == types_of_test_data)[0]
+            prec_types = len(correct) / len(max_type_labels)
+            summary_t = tf.Summary(value=[
+                tf.Summary.Value(tag="auc_pof", simple_value=auc_pof),
+                tf.Summary.Value(tag="prec_types", simple_value=prec_types)
+            ])
+
+            test_writer.add_summary(summary_r, i)
+            test_writer.add_summary(summary_t, i)
+
+    train_writer.flush()
+    test_writer.flush()
+
     return feed_dict
 
 def train(KB_full, KB_facts, data, alg='nc', noise_ratio=0.0, data_ratio=config.RATIO_DATA[0],
           lambda_2=config.LAMBDA_2, prior_mean=None):
     prior_lambda = config.REGULARIZATION
 
+    alg_label = "_nr_" + str(noise_ratio) + "_dr_" + str(data_ratio) + config.DATASET \
+                + 'TNORM' + config.TNORM + 'FORALL' + config.FORALL_AGGREGATOR + 'CLAUSE' + config.CLAUSE_AGGREGATOR
+
     # defining the label of the background knowledge
-    kb_label = "KB_" + alg + "_nr_" + str(noise_ratio) + "_dr_" + str(data_ratio)
+    kb_label = "KB_" + alg + alg_label
 
     if alg == 'prior':
-        kb_label = "KB_" + alg + '_l2_' + str(lambda_2) + "_nr_" + str(noise_ratio) + "_dr_" + str(data_ratio)
+        kb_label = "KB_" + alg + '_l2_' + str(lambda_2) + alg_label
         prior_lambda = lambda_2
 
     KB = KB_full if alg == 'wc' else KB_facts
@@ -211,6 +252,9 @@ def train(KB_full, KB_facts, data, alg='nc', noise_ratio=0.0, data_ratio=config.
         # start training
         if prior_mean is None:
             prior_mean = np.zeros(sess.run(KB.num_params, {}))
+        else:
+            saver = tf.train.Saver()
+            saver.restore(sess, 'models/prior.ckpt')
 
         train_fn(with_facts=True, with_constraints=alg == 'wc', iterations=config.MAX_TRAINING_ITERATIONS,
                 KB=KB, prior_mean=prior_mean, prior_lambda=prior_lambda,
@@ -218,6 +262,27 @@ def train(KB_full, KB_facts, data, alg='nc', noise_ratio=0.0, data_ratio=config.
 
         KB.save(sess, kb_label)
         print("end of training")
+
+def feed_dict_rules(feed_dict, pairs_data, with_constraints=True):
+    # feed data for axioms
+    tmp = pairs_data
+    if not config.USE_MUTUAL_EXCL_PREDICATES:
+        feed_dict[o.tensor] = tmp[:, :number_of_features]
+
+    if with_constraints:
+        for t in selected_types:
+            feed_dict[pw[t].tensor] = tmp
+            feed_dict[w1[t].tensor] = tmp[:, number_of_features:2 * number_of_features]
+            feed_dict[p1[t].tensor] = tmp[:, :number_of_features]
+
+        feed_dict[oo.tensor] = np.concatenate([tmp[:, :number_of_features], tmp[:, :number_of_features],
+                                               np.ones((tmp.shape[0], 2), dtype=float)], axis=1)
+        feed_dict[p0w0.tensor] = tmp
+        feed_dict[w0.tensor] = feed_dict[p0w0.tensor][:, number_of_features:2 * number_of_features]
+        feed_dict[p0.tensor] = feed_dict[p0w0.tensor][:, :number_of_features]
+        feed_dict[w0p0.tensor] = np.concatenate([
+            feed_dict[w0.tensor], feed_dict[p0.tensor], feed_dict[p0w0.tensor][:, -1:-3:-1]], axis=1)
+    return feed_dict
 
 def get_feed_dict(data, pairs_data, with_constraints=True, with_facts=True):
     # print("selecting new training data")
@@ -241,27 +306,7 @@ def get_feed_dict(data, pairs_data, with_constraints=True, with_facts=True):
 
         feed_dict[object_pairs_not_in_partOf.tensor] = \
             pairs_of_train_data[np.random.choice(idxs_of_neg_ex_of_partOf, config.N_NEG_EXAMPLES_PARTOF)]
-    # feed data for axioms
-    tmp = pairs_data[np.random.choice(range(pairs_data.shape[0]), number_of_pairs_for_axioms)]
-    if not config.USE_MUTUAL_EXCL_PREDICATES:
-        feed_dict[o.tensor] = tmp[:, :number_of_features]
-
-    if with_constraints:
-        for t in selected_types:
-            feed_dict[pw[t].tensor] = tmp
-            feed_dict[w1[t].tensor] = tmp[:, number_of_features:2 * number_of_features]
-            feed_dict[p1[t].tensor] = tmp[:, :number_of_features]
-
-        feed_dict[oo.tensor] = np.concatenate([tmp[:, :number_of_features], tmp[:, :number_of_features],
-                                               np.ones((tmp.shape[0], 2), dtype=float)], axis=1)
-        feed_dict[p0w0.tensor] = tmp
-        feed_dict[w0.tensor] = feed_dict[p0w0.tensor][:, number_of_features:2 * number_of_features]
-        feed_dict[p0.tensor] = feed_dict[p0w0.tensor][:, :number_of_features]
-        feed_dict[w0p0.tensor] = np.concatenate([
-            feed_dict[w0.tensor], feed_dict[p0.tensor], feed_dict[p0w0.tensor][:, -1:-3:-1]], axis=1)
-    # print("feed dict size is as follows")
-    # for k in feed_dict:
-    #     print(k.name, feed_dict[k].shape)
+    feed_dict_rules(feed_dict, pairs_data[np.random.choice(range(pairs_data.shape[0]), config.number_of_pairs_for_axioms)], with_constraints)
     return feed_dict
 
 
@@ -275,6 +320,9 @@ rules = partof_is_irreflexive + partOf_is_antisymmetric + clauses_for_wholes_of_
 if not config.USE_MUTUAL_EXCL_PREDICATES:
     rules += clauses_for_disjoint_types + clause_for_at_least_one_type
 
+for rule in rules:
+    tf.summary.scalar('rules/' + rule.label, rule.tensor, collections=['rules'])
+
 # Lists all predicates
 predicates = list(isOfType.values()) + [isPartOf]
 mutExPredicates = [mutExclType] if config.USE_MUTUAL_EXCL_PREDICATES else []
@@ -286,7 +334,8 @@ KB_facts = ltn.KnowledgeBase(predicates, mutExPredicates, facts, "facts", "model
 KB_rules = ltn.KnowledgeBase(predicates, mutExPredicates, rules, "rules", "models/")
 
 # The summary contains the loss tensors for the three Knowledge Bases defined up here.
-summary_merge = tf.summary.merge_all()
+summary_merge = tf.summary.merge_all(key='train')
+rules_summary = tf.summary.merge_all(key='rules')
 
 for nr in config.NOISE_VALUES:
     data = add_noise_to_data(nr)
@@ -300,6 +349,8 @@ for nr in config.NOISE_VALUES:
             feed_dict = train_fn(with_facts=False, with_constraints=True, iterations=config.MAX_PRIOR_TRAINING_IT,
                                  KB=KB_rules, prior_mean=prior_mean, prior_lambda=config.REGULARIZATION,
                                  sess=sess, data=data, kb_label='prior_training')
+
+            KB_rules.save(sess, 'prior')
 
             # Create the parameters for the informative prior
             prior_mean = sess.run(KB_rules.omega, feed_dict)
