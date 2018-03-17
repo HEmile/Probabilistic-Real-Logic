@@ -37,10 +37,11 @@ def disjunction_of_literals(literals, label="no_label"):
             result = tf.reduce_max(literals_tensor, 1, keep_dims=True, name=label)
         if config.FORALL_AGGREGATOR == "product":
             if config.CLAUSE_AGGREGATOR == 'log-likelihood':
-                return tf.reduce_sum(tf.log(literals_tensor), keep_dims=True, name=label)
+                return tf.reduce_sum(tf.log(result + config.EPSILON), keep_dims=True, name=label)
             else:
-                return tf.exp(tf.reduce_mean(tf.log(literals_tensor), keep_dims=True), name=label)
-            # return tf.reduce_prod(result, keep_dims=True)
+                return tf.exp(tf.reduce_mean(tf.log(result + config.EPSILON), keep_dims=True), name=label)
+        if config.FORALL_AGGREGATOR == "mean-log-likelihood":
+            return tf.reduce_mean(tf.log(result + config.EPSILON), keep_dims=True, name=label)
         if config.FORALL_AGGREGATOR == "mean":
             return tf.reduce_mean(result, keep_dims=True, name=label)
         if config.FORALL_AGGREGATOR == "gmean":
@@ -247,7 +248,7 @@ class KnowledgeBase:
                                          tf.reduce_sum(weights_tensor))
                 if config.CLAUSE_AGGREGATOR == 'log-likelihood':
                     # Smartly handle exp/log functions as it already uses exp sum log trick to compute product norm.
-                    if config.FORALL_AGGREGATOR == 'product':
+                    if config.FORALL_AGGREGATOR == 'product' or config.FORALL_AGGREGATOR == 'mean-log-likelihood':
                         self.tensor = tf.reduce_mean(clauses_value_tensor)
                     else:
                         self.tensor = tf.reduce_mean(tf.log(clauses_value_tensor))
