@@ -11,6 +11,8 @@ data_testing_dir = "data/testing/"
 zero_distance_threshold = 6
 number_of_features = 64
 
+random.seed(config.RANDOM_SEED)
+
 types = np.genfromtxt("data/classes.csv", dtype='U', delimiter=",")
 
 if config.DATASET == 'vehicle':
