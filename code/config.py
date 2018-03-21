@@ -7,18 +7,20 @@ import numpy as np
 MAX_TRAINING_ITERATIONS = 6000
 
 # Amount of iterations used to train the informative prior. Only for alg = 'prior'
-MAX_PRIOR_TRAINING_IT = 140
+MAX_PRIOR_TRAINING_IT = 2000
 
 # How often to change the data that's used to compute the gradient. 1 is recommended for pure stochastic descent
 FREQ_OF_FEED_DICT_GENERATION = 1
 
 # How often to save the model to the file. This is an expensive operation so it is not recommended to do this often
-FREQ_OF_SAVE = 1000
+FREQ_OF_SAVE = 10005
 
 # How often to print the current training loss
 FREQ_OF_PRINT = 20
 
-FREQ_OF_TEST = 40
+FREQ_OF_TEST = 200
+
+AMOUNT_OF_EVALUATIONS = 10
 
 # At what saturation (probability of knowledge base) to switch the feed dict. If a new feed dict is fed every iteration,
 # this does nothing.
@@ -30,15 +32,15 @@ NOISE_VALUES = [0.]
 
 # The values of Lambda_2 used in the informative prior.
 # LAMBDA_2_VALUES = [1e-3, 1e-4, 1e-5, 1e-6, 1e-7]
-LAMBDA_2_VALUES = [1e-4]
+LAMBDA_2_VALUES = [1e-5]
 
-# This is essentially the mini-batch size.
-N_POS_EXAMPLES_TYPES = 50
-N_NEG_EXAMPLES_TYPES = 50
-N_POS_EXAMPLES_PARTOF = 50
-N_NEG_EXAMPLES_PARTOF = 50
+# This is essentially the mini-batch size. The positive examples are for each type!
+N_EXAMPLES_TYPES = 60
+N_POS_EXAMPLES_PARTOF = 30
+N_NEG_EXAMPLES_PARTOF = 30
 number_of_pairs_for_axioms = 200
 
+# TODO: This used to be too high with 2000... We need to calculate why it is so bad at constraining its memory.
 NUMBER_PAIRS_AXIOMS_TESTING = 2000
 
 RATIO_DATA = [0.003]
@@ -51,10 +53,12 @@ DO_SEMI_SUPERVISED = True
 DATASET = 'indoor'
 
 # List. Return [True, False] to create models for both training with and without constraints.
-# ALGORITHMS = ['prior', 'nc', 'wc']
-ALGORITHMS = ['wc', 'nc']
+ALGORITHMS = ['prior', 'nc', 'wc']
+# ALGORITHMS = ['wc', ]
 
-RANDOM_SEED = 1238
+RANDOM_SEED = 1300
+
+EXPERIMENT_NAME = 'general_data'
 
 EPSILON = 0.000001
 
@@ -77,13 +81,21 @@ LAMBDA_2 = 1e-7
 
 TNORM = "product"
 
-FORALL_AGGREGATOR = "hmean"
+FORALL_AGGREGATOR = "mean-log-likelihood"
 
 POSITIVE_FACT_PENALTY = 0.
 
-CLAUSE_AGGREGATOR = "log-likelihood"
+CLAUSE_AGGREGATOR = "w-log-likelihood"
 
 OPTIMIZER = 'rmsprop'
+
+WEIGHT_ONTOLOGY_CLAUSES = 1.
+
+WEIGHT_LOGICAL_CLAUSES = 1.
+
+WEIGHT_PARTOF_EXAMPLES = 1.
+
+WEIGHT_TYPES_EXAMPLES = 2.2
 
 #################
 # EVALUATION

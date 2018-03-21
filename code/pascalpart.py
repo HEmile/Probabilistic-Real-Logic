@@ -33,13 +33,11 @@ pairs_of_objects = ltn.Domain(2 * number_of_features + 2, label="a_pair_of_bound
 
 # Create type predicates acting on the objects domain
 isOfType = {}
-if config.USE_MUTUAL_EXCL_PREDICATES:
-    mutExclType = ltn.MutualExclusivePredicates('is_of_type_', len(selected_types), objects, config.MUT_EXCL_LAYERS)
-    for i in range(mutExclType.amt_predicates):
-        isOfType[selected_types[i]] = mutExclType.predicates[i]
-else:
-    for t in selected_types:
-        isOfType[t] = ltn.Predicate("is_of_type_" + t, objects, config.TYPE_LAYERS)
+labelOfType = {}
+mutExclType = ltn.MutualExclusivePredicates('is_of_type_', len(selected_types), objects, config.MUT_EXCL_LAYERS)
+for i in range(mutExclType.amt_predicates):
+    isOfType[selected_types[i]] = mutExclType.predicates[i]
+    labelOfType[selected_types[i]] = i
 
 # Create partOf predicate acting on the pairs of objects domain
 isPartOf = ltn.Predicate("is_part_of", pairs_of_objects, config.PART_OF_LAYERS)
@@ -66,8 +64,10 @@ def containment_ratios_between_two_bbxes(bb1, bb2):
     return [float(bb_area_intersection) / bb1_area, float(bb_area_intersection) / bb2_area]
 
 
-def get_data(train_or_test_swritch, max_rows=10000000, data_ratio=config.RATIO_DATA[0]):
+def get_data(train_or_test_swritch, max_rows=10000000, data_ratio=config.RATIO_DATA[0], seed=config.RANDOM_SEED):
     assert train_or_test_swritch == "train" or train_or_test_swritch == "test"
+
+    random.seed(seed)
 
     # Fetching the data from the file system
 

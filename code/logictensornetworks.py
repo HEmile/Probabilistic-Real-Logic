@@ -181,21 +181,23 @@ class MutualExclusivePredicates:
                 self.predicates.append(_MutExclPredicate(label + str(i), self.domain, self.tensor, i))
 
     def tensor(self, domain, output_index):
+        logits = self.logits(domain)
+        softmax_layer = tf.nn.softmax(logits, name='output_' + (domain.label if domain else self.domain.label))
+        return tf.reshape(softmax_layer[:, output_index], [-1, 1])
+
+    def logits(self, domain):
         if domain is None:
             domain = self.domain
         if domain in self.tensors:
-            softmax_layer = self.tensors[domain]
+            logits = self.tensors[domain]
         else:
             with tf.variable_scope('MutualExclusivePredicate_' + self.label + domain.label) as sc:
                 X = domain.tensor
                 XW = tf.matmul(tf.tile(tf.expand_dims(X, 0), [self.number_of_layers, 1, 1]), self.W)
                 XWX = tf.squeeze(tf.matmul(tf.expand_dims(X, 1), tf.transpose(XW, [1, 2, 0])))
                 XV = tf.matmul(X, tf.transpose(self.V))
-                gX = tf.matmul(tf.nn.relu(XWX + XV + self.b), self.U)
-                softmax_layer = tf.nn.softmax(gX, name='output_' + domain.label)
-                self.tensors[domain] = softmax_layer
-        return tf.reshape(softmax_layer[:, output_index], [-1, 1])
-
+                logits = tf.matmul(tf.nn.relu(XWX + XV + self.b), self.U)
+        return logits
 
 class Literal:
     def __init__(self, polarity, predicate, domain=None):
@@ -224,6 +226,16 @@ class Clause:
             self.tensor = tf.reshape(disjunction_of_literals(self.literals, label=label), (), name='satisfaction')
             self.predicates = set([lit.predicate for lit in self.literals])
 
+class TypeClause(Clause):
+    def __init__(self, mut_excl_pred, domain=None, weight=1.0, label=''):
+        with tf.variable_scope('TypeClause_' + label) as sc:
+            self.weight = weight
+            self.label = label
+            self.correct_labels = tf.placeholder('int32', shape=[None], name='placeholder')
+            self.tensor = tf.reduce_mean(-tf.nn.softmax_cross_entropy_with_logits\
+                (labels=tf.one_hot(self.correct_labels, mut_excl_pred.amt_predicates),
+                 logits=mut_excl_pred.logits(domain)), name='satisfaction')
+
 
 class KnowledgeBase:
     # Note: This does not currently support functions
@@ -233,6 +245,7 @@ class KnowledgeBase:
             if not self.clauses:
                 self.tensor = tf.constant(1.0)
             else:
+                weights_tensor = tf.constant([cl.weight for cl in clauses])
                 clauses_value_tensor = tf.stack([cl.tensor for cl in clauses], 0)
                 if config.CLAUSE_AGGREGATOR == "min":
                     print("clauses aggregator is min")
@@ -243,7 +256,6 @@ class KnowledgeBase:
                     self.tensor = tf.div(tf.to_float(tf.size(clauses_value_tensor)),
                                          tf.reduce_sum(tf.reciprocal(clauses_value_tensor), keep_dims=True))
                 if config.CLAUSE_AGGREGATOR == "wmean":
-                    weights_tensor = tf.constant([cl.weight for cl in clauses])
                     self.tensor = tf.div(tf.reduce_sum(tf.multiply(weights_tensor, clauses_value_tensor)),
                                          tf.reduce_sum(weights_tensor))
                 if config.CLAUSE_AGGREGATOR == 'log-likelihood':
@@ -252,6 +264,12 @@ class KnowledgeBase:
                         self.tensor = tf.reduce_mean(clauses_value_tensor)
                     else:
                         self.tensor = tf.reduce_mean(tf.log(clauses_value_tensor))
+                if config.CLAUSE_AGGREGATOR == 'w-log-likelihood':
+                    # Smartly handle exp/log functions as it already uses exp sum log trick to compute product norm.
+                    if config.FORALL_AGGREGATOR == 'product' or config.FORALL_AGGREGATOR == 'mean-log-likelihood':
+                        self.tensor = tf.reduce_mean(tf.multiply(clauses_value_tensor, weights_tensor))
+                    else:
+                        self.tensor = tf.reduce_mean(tf.multiply(tf.log(clauses_value_tensor), weights_tensor))
             self.tensor = tf.reshape(self.tensor, shape=(), name=kbLabel + 'loss')
             tf.summary.scalar(kbLabel + 'loss', self.tensor, collections=['train'])
 
