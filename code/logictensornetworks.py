@@ -15,6 +15,8 @@ def train_op(loss, optimization_algorithm):
             optimizer = tf.train.AdagradOptimizer(learning_rate=0.01)
         if optimization_algorithm == "rmsprop":
             optimizer = tf.train.RMSPropOptimizer(learning_rate=0.01, decay=0.9)
+        if optimization_algorithm == "adam":
+            optimizer = tf.train.AdamOptimizer(learning_rate=0.01)
         return optimizer.minimize(loss)
 
 
@@ -23,8 +25,8 @@ def PR(tensor):
     return tf.Print(tensor, [tf.shape(tensor), tensor.name, tensor], summarize=200000)
 
 
-def disjunction_of_literals(literals, label="no_label"):
-    with tf.variable_scope('disjunction_' + label) as sc:
+def t_norm(literals, label=""):
+    with tf.variable_scope('t_norm_' + label) as sc:
         list_of_literal_tensors = [lit.tensor for lit in literals]
         literals_tensor = tf.concat(list_of_literal_tensors, 1)
         if config.TNORM == "product":
@@ -35,6 +37,27 @@ def disjunction_of_literals(literals, label="no_label"):
             result = tf.minimum(1.0, tf.reduce_sum(literals_tensor, 1, keep_dims=True))
         if config.TNORM == "goedel":
             result = tf.reduce_max(literals_tensor, 1, keep_dims=True, name=label)
+        return result
+
+def s_norm(literals, label=""):
+    with tf.variable_scope('s_norm' + label) as sc:
+        list_of_literal_tensors = [lit.tensor for lit in literals]
+        literals_tensor = tf.concat(list_of_literal_tensors, 1)
+        if config.TNORM == "product":
+            result = tf.reduce_prod(literals_tensor, 1, keep_dims=True)
+        if config.TNORM == "goedel":
+            result = tf.reduce_min(literals_tensor, 1, keep_dims=True, name=label)
+        return result
+
+def disjunction_of_literals(literals, label="no_label"):
+    with tf.variable_scope('disjunction_' + label) as sc:
+        result = t_norm(literals, label)
+
+        if config.USE_CLAUSE_FILTERING:
+            result = tf.where(tf.greater(config.CLAUSE_FILTER_THRESHOLD, result),
+                              result, tf.clip_by_value(result, 1, 1), name='clause_filter')
+            # result = tf.minimum(result, config.CLAUSE_FILTER_THRESHOLD, name='clause_filter')
+
         if config.FORALL_AGGREGATOR == "product":
             if config.CLAUSE_AGGREGATOR == 'log-likelihood':
                 return tf.reduce_sum(tf.log(result + config.EPSILON), keep_dims=True, name=label)
@@ -51,7 +74,6 @@ def disjunction_of_literals(literals, label="no_label"):
             return tf.div(tf.to_float(tf.size(result)), tf.reduce_sum(tf.reciprocal(result), keep_dims=True))
         if config.FORALL_AGGREGATOR == "min":
             return tf.reduce_min(result, keep_dims=True, name=label)
-
 
 
 # Domain defines a term-space. The domain is a subset of vectors in real^self.columns.
@@ -200,20 +222,19 @@ class MutualExclusivePredicates:
         return logits
 
 class Literal:
-    def __init__(self, polarity, predicate, domain=None):
+    def __init__(self, polarity, predicate, domain=None, disable_gradient=False, name=''):
         self.predicate = predicate
         self.polarity = polarity
         self.domain = domain
+        self.name = name
         if domain is None:
             self.domain = predicate.domain
         if polarity:
             self.tensor = predicate.tensor(domain)
         else:
-            if config.TNORM == "goedel":
-                y = tf.equal(predicate.tensor(domain), 0.0)
-                self.tensor = tf.cast(y, tf.float32)
-            else:
-                self.tensor = 1 - predicate.tensor(domain)
+            self.tensor = 1 - predicate.tensor(domain)
+        if disable_gradient:
+            self.tensor = tf.stop_gradient(self.tensor)
 
 # Clauses are a disjunction of literals. Other forms of clauses are currently
 # not accepted.
@@ -236,6 +257,23 @@ class TypeClause(Clause):
                 (labels=tf.one_hot(self.correct_labels, mut_excl_pred.amt_predicates),
                  logits=mut_excl_pred.logits(domain)), name='satisfaction')
 
+class ImplicationClause(Clause):
+    def __init__(self, antecedent, consequent, label="", weight=1.0):
+        with tf.variable_scope('ImplicationClause_' + label) as sc:
+            self.weight = weight
+            self.label = label
+            self.literals = antecedent + consequent
+            self.predicates = set([lit.predicate for lit in self.literals])
+            # Connect the antecedent through the s-norm (and). Do not propagate gradients
+            self.ant_tensor = tf.stop_gradient(s_norm(antecedent, label + "antecedent"))
+            # Connect the consequent through the t-norm (or)
+            self.con_tensor = t_norm(consequent, label + "consequent")
+            if config.TNORM == 'product':
+                self.tensor = 1 - self.ant_tensor*(1-self.con_tensor)
+            if config.TNORM == 'goedel':
+                self.tensor = tf.maximum(1-self.ant_tensor, self.con_tensor)
+            self.tensor = tf.reduce_mean(tf.log(self.tensor + config.EPSILON), name='satisfaction')
+            # self.tensor = tf.reduce_mean(tf.multiply(tf.log(self.con_tensor + config.EPSILON), self.ant_tensor), name='satisfaction')
 
 class KnowledgeBase:
     # Note: This does not currently support functions
@@ -267,7 +305,7 @@ class KnowledgeBase:
                 if config.CLAUSE_AGGREGATOR == 'w-log-likelihood':
                     # Smartly handle exp/log functions as it already uses exp sum log trick to compute product norm.
                     if config.FORALL_AGGREGATOR == 'product' or config.FORALL_AGGREGATOR == 'mean-log-likelihood':
-                        self.tensor = tf.reduce_mean(tf.multiply(clauses_value_tensor, weights_tensor))
+                        self.tensor = tf.reduce_mean(tf.multiply(clauses_value_tensor, weights_tensor / tf.reduce_sum(weights_tensor)))
                     else:
                         self.tensor = tf.reduce_mean(tf.multiply(tf.log(clauses_value_tensor), weights_tensor))
             self.tensor = tf.reshape(self.tensor, shape=(), name=kbLabel + 'loss')
