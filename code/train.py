@@ -11,11 +11,14 @@ tf_config = tf.ConfigProto(device_count={'GPU': 1})
 
 # When using semi-supervised training, also load in the pairs for the complete dataset
 if config.DO_SEMI_SUPERVISED:
-    _, all_pairs_of_train_data, _, _, _, _ = get_data("train", max_rows=1000000000, data_ratio=1)
+    _, all_pairs_of_train_data, _, all_pairs_of_partOF_train_data, _, _ = get_data("train", max_rows=1000000000, data_ratio=1)
+    idxs_of_all_positive_examples_of_partOf = np.where(all_pairs_of_partOF_train_data)[0]
+    idxs_of_all_negative_examples_of_partOf = np.where(all_pairs_of_partOF_train_data == False)[0]
 
 # loading test data
 test_data, pairs_of_test_data, types_of_test_data, partOF_of_pairs_of_test_data, pairs_of_bb_idxs_test, pics = get_data(
     "test", max_rows=50000, data_ratio=1)
+idxs_of_test_pos_examples_of_partOf = np.where(partOF_of_pairs_of_test_data)[0]
 
 print("finished uploading and analyzing data")
 print("Start model definition")
@@ -27,11 +30,11 @@ clause_for_types = [ltn.TypeClause(mutExclType,
 labels_placeholder = clause_for_types[0].correct_labels
 
 clause_for_positive_examples_of_partOf = [ltn.Clause([ltn.Literal(True, isPartOf, object_pairs_in_partOf)],
-                                         label="examples_of_object_pairs_in_partof_relation", weight=config.WEIGHT_PARTOF_EXAMPLES)]
+                                         label="examples_of_object_pairs_in_partof_relation", weight=config.WEIGHT_POS_PARTOF_EXAMPLES)]
 
 clause_for_negative_examples_of_partOf = [ltn.Clause([ltn.Literal(False, isPartOf, object_pairs_not_in_partOf)],
                                                      label="examples_of_object_pairs_not_in_part_of_relation",
-                                                     weight=config.WEIGHT_PARTOF_EXAMPLES)]
+                                                     weight=config.WEIGHT_NEG_PARTOF_EXAMPLES)]
 
 # defining axioms from the partOf ontology
 parts_of_whole, wholes_of_part = get_part_whole_ontology()
@@ -50,35 +53,55 @@ for t in selected_types:
     w1[t] = ltn.Domain(number_of_features, label="whole_predicted_objects_for_" + t)
     p1[t] = ltn.Domain(number_of_features, label="part_predicted_objects_for_" + t)
     pw[t] = ltn.Domain(number_of_features * 2 + 2, label="potential_part_whole_object_pairs_for_" + t)
+weight_ontology = tf.placeholder('float32', ())
+if config.USE_IMPLICATION_CLAUSES:
+    partOf_is_antisymmetric = [ltn.ImplicationClause(antecedent=[ltn.Literal(True, isPartOf, p0w0)],
+                                                     consequent=[ltn.Literal(False, isPartOf, w0p0)],
+                                          label="part_of_is_antisymmetric", weight=config.WEIGHT_LOGICAL_CLAUSES)]
 
-partOf_is_antisymmetric = [ltn.Clause([ltn.Literal(False, isPartOf, p0w0), ltn.Literal(False, isPartOf, w0p0)],
-                                      label="part_of_is_antisymmetric", weight=config.WEIGHT_LOGICAL_CLAUSES)]
+    clauses_for_parts_of_wholes = [
+        ltn.ImplicationClause(antecedent=[ltn.Literal(True, isOfType[w], w1[w], name=w),
+                                          ltn.Literal(True, isPartOf, pw[w], name='partOf')],
+                   consequent=[ltn.Literal(True, isOfType[p], p1[w], name=p) for p in parts_of_whole[w]],
+                   label="parts_of_" + w, weight=weight_ontology) for w in parts_of_whole.keys()
+                    if len(parts_of_whole[w]) > 0]
 
+    clauses_for_wholes_of_parts = [
+        ltn.ImplicationClause(antecedent=[ltn.Literal(True, isOfType[p], p1[p], name=p),
+                                          ltn.Literal(True, isPartOf, pw[p], name='partOf')],
+                   consequent=[ltn.Literal(True, isOfType[w], w1[p], name=w) for w in wholes_of_part[p]],
+                   label="wholes_of_" + p, weight=weight_ontology) for p in wholes_of_part.keys()
+                    if len(wholes_of_part[p]) > 0]
+else:
+    disable_prec_gradient = not config.CAN_ONTOLOGY_TRAIN_PRECEDENT
+
+    partOf_is_antisymmetric = [ltn.Clause([ltn.Literal(False, isPartOf, p0w0, disable_gradient=disable_prec_gradient),
+                                           ltn.Literal(False, isPartOf, w0p0)],
+                                          label="part_of_is_antisymmetric", weight=config.WEIGHT_LOGICAL_CLAUSES)]
+
+    clauses_for_parts_of_wholes = [ltn.Clause([ltn.Literal(False, isOfType[w], w1[w], disable_gradient=disable_prec_gradient),
+                                               ltn.Literal(False, isPartOf, pw[w], disable_gradient=disable_prec_gradient)] + \
+                                              [ltn.Literal(True, isOfType[p], p1[w]) for p in parts_of_whole[w]],
+                                              label="parts_of_" + w, weight=config.WEIGHT_ONTOLOGY_CLAUSES) for w in parts_of_whole.keys()]
+
+    clauses_for_wholes_of_parts = [ltn.Clause([ltn.Literal(False, isOfType[p], p1[p], disable_gradient=disable_prec_gradient),
+                                               ltn.Literal(False, isPartOf, pw[p], disable_gradient=disable_prec_gradient)] +
+                                              [ltn.Literal(True, isOfType[w], w1[p]) for w in wholes_of_part[p]],
+                                              label="wholes_of_" + p, weight=config.WEIGHT_ONTOLOGY_CLAUSES) for p in wholes_of_part.keys()]
 partof_is_irreflexive = [ltn.Clause([ltn.Literal(False, isPartOf, oo)],
-                                    label="part_of_is_irreflexive", weight=config.WEIGHT_LOGICAL_CLAUSES)]
-
-clauses_for_parts_of_wholes = [ltn.Clause([ltn.Literal(False, isOfType[w], w1[w]),
-                                           ltn.Literal(False, isPartOf, pw[w])] + \
-                                          [ltn.Literal(True, isOfType[p], p1[w]) for p in parts_of_whole[w]],
-                                          label="parts_of_" + w, weight=config.WEIGHT_ONTOLOGY_CLAUSES) for w in parts_of_whole.keys()]
-
-clauses_for_wholes_of_parts = [ltn.Clause([ltn.Literal(False, isOfType[p], p1[p]),
-                                           ltn.Literal(False, isPartOf, pw[p])] +
-                                          [ltn.Literal(True, isOfType[w], w1[p]) for w in wholes_of_part[p]],
-                                          label="wholes_of_" + p, weight=config.WEIGHT_ONTOLOGY_CLAUSES) for p in wholes_of_part.keys()]
-
+                                        label="part_of_is_irreflexive", weight=config.WEIGHT_LOGICAL_CLAUSES)]
 # if not config.USE_MUTUAL_EXCL_PREDICATES:
 # These are not needed when using the softmax output function. Also speeds up the computation massively
 # not to have them :)
 o = ltn.Domain(number_of_features, label="a_generi_object")
 
-clauses_for_disjoint_types = [ltn.Clause([ltn.Literal(False, isOfType[t], o),
-                                          ltn.Literal(False, isOfType[t1], o)], label=t + "_is_not_" + t1) for t in
-                              selected_types for t1 in selected_types if t < t1]
+# clauses_for_disjoint_types = [ltn.Clause([ltn.Literal(False, isOfType[t], o, disable_gradient=disable_prec_gradient),
+#                                           ltn.Literal(False, isOfType[t1], o)], label=t + "_is_not_" + t1) for t in
+#                               selected_types for t1 in selected_types if t < t1]
 
-clause_for_at_least_one_type = [
-    ltn.Clause([ltn.Literal(True, isOfType[t], o) for t in selected_types],
-               label="an_object_has_at_least_one_type")]
+# clause_for_at_least_one_type = [
+#     ltn.Clause([ltn.Literal(True, isOfType[t], o) for t in selected_types],
+#                label="an_object_has_at_least_one_type")]
 
 
 # return partof_is_irreflexive + partOf_is_antisymmetric + clauses_for_wholes_of_parts + \
@@ -144,8 +167,8 @@ clause_for_at_least_one_type = [
 
 def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lambda, sess, kb_label):
     random.seed(config.RANDOM_SEED)
-    train_writer = tf.summary.FileWriter('logging/' + kb_label + '/train', sess.graph)
-    test_writer = tf.summary.FileWriter('logging/' + kb_label + '/test', sess.graph)
+    train_writer = tf.summary.FileWriter('logging/' + kb_label + '/train', graph=None)
+    test_writer = tf.summary.FileWriter('logging/' + kb_label + '/test', graph=None)
 
     train_kb = True
     for i in range(iterations):
@@ -155,6 +178,9 @@ def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lam
             feed_dict = get_feed_dict(pairs_of_train_data, with_constraints=with_constraints, with_facts=with_facts)
             feed_dict[KB.prior_mean] = prior_mean
             feed_dict[KB.prior_lambda] = prior_lambda
+            feed_dict[weight_ontology] = config.WEIGHT_ONTOLOGY_CLAUSES_START if \
+                i < config.ITERATIONS_UNTIL_WEIGHT_SWAP else config.WEIGHT_ONTOLOGY_CLAUSES_END
+
         if train_kb:
             sat_level, normal_loss, reg_loss = KB.train(sess, feed_dict)
             if np.isnan(sat_level):
@@ -169,6 +195,8 @@ def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lam
             for kb in [KB_facts, KB_rules, KB_full, KB_ontology, KB_logical]:
                 feed_dict[kb.prior_mean] = prior_mean
                 feed_dict[kb.prior_lambda] = prior_lambda
+                feed_dict[weight_ontology] = config.WEIGHT_ONTOLOGY_CLAUSES_START if \
+                    i < config.ITERATIONS_UNTIL_WEIGHT_SWAP else config.WEIGHT_ONTOLOGY_CLAUSES_END
 
             summary = sess.run(summary_merge, feed_dict)
             train_writer.add_summary(summary, i)
@@ -180,20 +208,103 @@ def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lam
         if i % config.FREQ_OF_TEST == 0:
             predicted_types_values_tensor = tf.concat([isOfType[t].tensor() for t in selected_types], 1)
             predicted_partOf_value_tensor = ltn.Literal(True, isPartOf, pairs_of_objects).tensor
-            # values_of_types = sess.run(predicted_types_values_tensor, {objects.tensor: test_data[:, 1:]})
-            # values_of_partOf = sess.run(predicted_partOf_value_tensor, {pairs_of_objects.tensor: pairs_of_test_data})
 
             feed_dict = {}
             feed_dict[objects.tensor] = test_data[:, 1:]
             feed_dict[pairs_of_objects.tensor] = pairs_of_test_data
+            feed_dict[weight_ontology] = config.WEIGHT_ONTOLOGY_CLAUSES_START if \
+                i < config.ITERATIONS_UNTIL_WEIGHT_SWAP else config.WEIGHT_ONTOLOGY_CLAUSES_END
 
-            feed_dict_rules(feed_dict, pairs_of_test_data[np.random.choice(range(pairs_of_test_data.shape[0]),
-                                                                           config.NUMBER_PAIRS_AXIOMS_TESTING)], )
+            chosen_pairs = np.random.choice(range(pairs_of_test_data.shape[0]), config.NUMBER_PAIRS_AXIOMS_TESTING)
+            # chosen_pairs = np.random.choice(idxs_of_test_pos_examples_of_partOf, config.NUMBER_PAIRS_AXIOMS_TESTING)
 
-            values_of_types, values_of_partOf, summary_r = sess.run([predicted_types_values_tensor,
-                                                                     predicted_partOf_value_tensor,
-                                                                     rules_summary], feed_dict)
+            feed_dict_rules(feed_dict, pairs_of_test_data[chosen_pairs])
 
+            outputs = sess.run([predicted_types_values_tensor, predicted_partOf_value_tensor,
+                    rules_summary] + literal_debug1, feed_dict)
+            values_of_types = outputs[0]
+            values_of_partOf = outputs[1]
+            summary_r = outputs[2]
+            literals = outputs[3:]
+
+            is_pair_of = partOF_of_pairs_of_test_data[chosen_pairs]
+            bb_ids = pairs_of_bb_idxs_test[chosen_pairs]
+            correct_updates = 0
+            correct_conseq_updates = 0
+            wrong_updates = 0
+            num_pos_correct_updates = 0
+            num_ant_updates = 0
+            for r_i in range(len(rules_ontology)):
+                rule = rules_ontology[r_i]
+                wholes_of = rule in clauses_for_wholes_of_parts
+                print(' and '.join([l.name for l in rule.literals[:2]]) + "->" +
+                      ' or '.join([l.name for l in rule.literals[2:]]))
+                for j in range(len(chosen_pairs)):
+                    label1, label2 = bb_ids[j][0], bb_ids[j][1]
+                    t1 = types_of_test_data[label1]
+                    t2 = types_of_test_data[label2]
+                    x = t1 if wholes_of else t2
+                    y = t2 if wholes_of else t1
+                    correct_conseq = y in [l.name for l in rule.literals[2:]]
+                    correct_update = is_pair_of[j] and x == rule.literals[0].name and correct_conseq
+                    big_gradient = False
+                    if correct_update:
+                        num_pos_correct_updates += 1
+                    if config.USE_IMPLICATION_CLAUSES:
+                        conjunct = literals[r_i][j, :]
+
+                        if config.TNORM == 'product':
+                            cons_p = 1 - np.prod(1 - conjunct[2:])
+                        if config.TNORM == 'goedel':
+                            cons_p = np.max(conjunct[2:])
+
+                        if config.SNORM == 'product':
+                            ant_p = np.prod(conjunct[:2])
+                            truth_val = 1-ant_p*(1-cons_p)
+
+                        if config.TNORM == 'goedel' and config.SNORM == 'product':
+                            def calc_grad(index_in_conj):
+                                is_max = np.argmax(conjunct[2:]) == index_in_conj
+                                return is_max * ant_p /truth_val
+
+                        if config.TNORM == 'product' and config.SNORM == 'product':
+                            def calc_grad(index_in_conj):
+                                conj2 = list(conjunct[2:])
+                                conj2[index_in_conj] = 0
+                                return ant_p * np.prod(1-np.array(conj2))/truth_val
+                        gradients = [0, 0]
+
+                        for z in range(len(conjunct) - 2):
+                            grad = calc_grad(z)
+                            gradients.append(grad)
+                            if grad > 0.1:
+                                big_gradient = True
+                        if big_gradient and config.PRINT_GRAD_DEBUG:
+                            print(correct_update, is_pair_of[j], t1, t2, truth_val, ant_p, cons_p,
+                                  np.log(truth_val))
+                    else:
+                        gradients = []
+                        for z in range(len(rule.literals)):
+                            g = np.prod([1 - (0 if y == z else literals[r_i][j, y])
+                                                      for y in range(len(rule.literals))])
+                            gradients.append(g)
+                            if g > 0.1:
+                                big_gradient = True
+                                if z < 2:
+                                    num_ant_updates += 1
+                        if big_gradient and config.PRINT_GRAD_DEBUG:
+                            print(is_pair_of[j], t1, t2, 1 - np.prod(1 - literals[r_i][j, :]))
+                    if big_gradient:
+                        if correct_update:
+                            correct_updates += 1
+                        else:
+                            wrong_updates += 1
+                        if correct_conseq:
+                            correct_conseq_updates += 1
+                        if config.PRINT_GRAD_DEBUG:
+                            print(literals[r_i][j, :])
+                            print(gradients)
+            # np.savetxt('literaldebug/' + config.EXPERIMENT_NAME + str(i), literals)
             cm = compute_confusion_matrix_pof(config.THRESHOLDS, values_of_partOf,
                                               pairs_of_test_data, partOF_of_pairs_of_test_data)
             measures = {}
@@ -206,9 +317,24 @@ def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lam
             max_type_labels = selected_types[max_type_labels]
             correct = np.where(max_type_labels == types_of_test_data)[0]
             prec_types = len(correct) / len(max_type_labels)
+
+            num_gradient_updates = correct_updates+wrong_updates
+            prec_gradient_update = 0 if num_gradient_updates == 0 else correct_updates/num_gradient_updates
+            prec_conseq_update = 1 if num_gradient_updates == 0 else correct_conseq_updates / num_gradient_updates
+            recall_gradient_update = correct_updates / num_pos_correct_updates
+            f1_gradient_update = 0 if num_gradient_updates == 0 else\
+                2/(1/recall_gradient_update + 1/prec_gradient_update)
+            ratio_ant_updates = 0 if num_gradient_updates == 0 else num_ant_updates / num_gradient_updates
+
             summary_t = tf.Summary(value=[
-                tf.Summary.Value(tag="auc_pof", simple_value=auc_pof),
-                tf.Summary.Value(tag="prec_types", simple_value=prec_types)
+                tf.Summary.Value(tag="test/auc_pof", simple_value=auc_pof),
+                tf.Summary.Value(tag="test/prec_types", simple_value=prec_types),
+                tf.Summary.Value(tag="grad_debug/prec_update", simple_value=prec_gradient_update),
+                tf.Summary.Value(tag="grad_debug/num_update", simple_value=num_gradient_updates),
+                tf.Summary.Value(tag="grad_debug/prec_conseq_update", simple_value=prec_conseq_update),
+                tf.Summary.Value(tag="grad_debug/recall_update", simple_value=recall_gradient_update),
+                tf.Summary.Value(tag="grad_debug/f1_update", simple_value=f1_gradient_update),
+                tf.Summary.Value(tag="grad_debug/ratio_ant_update", simple_value=ratio_ant_updates)
             ])
 
             test_writer.add_summary(summary_r, i)
@@ -225,7 +351,7 @@ def train(KB, seed, alg='nc', noise_ratio=0.0, data_ratio=config.RATIO_DATA[0],
     prior_lambda = config.REGULARIZATION
 
     alg_label = ("_SEMI_" if config.DO_SEMI_SUPERVISED else "") + "_nr_" + str(noise_ratio) + "_dr_" + str(data_ratio) \
-                + config.DATASET + 'TNORM' + config.TNORM + 'FORALL' + config.FORALL_AGGREGATOR + \
+                + config.DATASET + 'TNORM' + config.TNORM + 'SNORM' + config.SNORM + 'FORALL' + config.FORALL_AGGREGATOR + \
                 'CLAUSE' + config.CLAUSE_AGGREGATOR + '_' + config.EXPERIMENT_NAME + '_SEED_' + str(seed)
 
     # defining the label of the background knowledge
@@ -284,15 +410,25 @@ def get_feed_dict(pairs_data, with_constraints=True, with_facts=True):
         feed_dict[labels_placeholder] = [labelOfType[t] for t in types_of_train_data[chosen_examples]]
 
         # positive and negative examples for partOF
-        feed_dict[object_pairs_in_partOf.tensor] = \
-            pairs_of_train_data[np.random.choice(idxs_of_positive_examples_of_partOf, config.N_POS_EXAMPLES_PARTOF)]
+        if not config.CHEAT_SEMI_SUPERVISED:
+            feed_dict[object_pairs_in_partOf.tensor] = \
+                pairs_of_train_data[np.random.choice(idxs_of_positive_examples_of_partOf, config.N_POS_EXAMPLES_PARTOF)]
 
-        feed_dict[object_pairs_not_in_partOf.tensor] = \
-            pairs_of_train_data[np.random.choice(idxs_of_negative_examples_of_partOf, config.N_NEG_EXAMPLES_PARTOF)]
+            feed_dict[object_pairs_not_in_partOf.tensor] = \
+                pairs_of_train_data[np.random.choice(idxs_of_negative_examples_of_partOf, config.N_NEG_EXAMPLES_PARTOF)]
+        else:
+            feed_dict[object_pairs_in_partOf.tensor] = \
+                all_pairs_of_train_data[np.random.choice(idxs_of_all_positive_examples_of_partOf, config.N_POS_EXAMPLES_PARTOF)]
+
+            feed_dict[object_pairs_not_in_partOf.tensor] = \
+                all_pairs_of_train_data[np.random.choice(idxs_of_all_negative_examples_of_partOf, config.N_NEG_EXAMPLES_PARTOF)]
+
     if config.DO_SEMI_SUPERVISED:
-        feed_dict_rules(feed_dict,
-                        all_pairs_of_train_data[np.random.choice(range(all_pairs_of_train_data.shape[0]),
-                                                                 config.number_of_pairs_for_axioms)], with_constraints)
+        if config.CHEAT_SEMI_SUPERVISED:
+            chosen_pairs = np.random.choice(idxs_of_all_positive_examples_of_partOf, config.number_of_pairs_for_axioms)
+        else:
+            chosen_pairs = np.random.choice(range(all_pairs_of_train_data.shape[0]), config.number_of_pairs_for_axioms)
+        feed_dict_rules(feed_dict, all_pairs_of_train_data[chosen_pairs], with_constraints)
     else:
         feed_dict_rules(feed_dict,
                         pairs_data[np.random.choice(range(pairs_data.shape[0]), config.number_of_pairs_for_axioms)],
@@ -307,8 +443,8 @@ rules_ontology = clauses_for_wholes_of_parts + clauses_for_parts_of_wholes
 rules_logical = partof_is_irreflexive + partOf_is_antisymmetric
 rules = rules_ontology + rules_logical
 
-if not config.USE_MUTUAL_EXCL_PREDICATES:
-    rules += clauses_for_disjoint_types + clause_for_at_least_one_type
+# if not config.USE_MUTUAL_EXCL_PREDICATES:
+# rules += clauses_for_disjoint_types + clause_for_at_least_one_type
 
 for rule in rules:
     tensor = rule.tensor
@@ -330,6 +466,9 @@ for literal in clause_to_debug.literals:
     tf.summary.scalar('rules/' + clause_to_debug.label + '/' + literal.predicate.label + '_' +
                       literal.domain.label + str(literal.polarity), tensor, collections=['rules'])
 
+clause_to_debug = clauses_for_parts_of_wholes[0]
+literal_debug1 = [tf.concat([literal.tensor for literal in rule.literals], axis=1)
+    for rule in rules_ontology]
 
 # Lists all predicates
 predicates = list(isOfType.values()) + [isPartOf]
@@ -341,8 +480,8 @@ KB_full = ltn.KnowledgeBase(predicates, mutExPredicates, facts + rules, "full", 
 KB_facts = ltn.KnowledgeBase(predicates, mutExPredicates, facts, "facts", "models/")
 KB_rules = ltn.KnowledgeBase(predicates, mutExPredicates, rules, "rules", "models/")
 
-KB_ontology = ltn.KnowledgeBase(predicates, mutExPredicates, facts + rules_ontology, "ontology", "models/")
-KB_logical = ltn.KnowledgeBase(predicates, mutExPredicates, facts + rules_logical, "logical", "models/")
+KB_ontology = ltn.KnowledgeBase(predicates, mutExPredicates, rules_ontology, "ontology", "models/")
+KB_logical = ltn.KnowledgeBase(predicates, mutExPredicates, rules_logical, "logical", "models/")
 
 # The summary contains the loss tensors for the three Knowledge Bases defined up here.
 summary_merge = tf.summary.merge_all(key='train')
@@ -350,54 +489,55 @@ rules_summary = tf.summary.merge_all(key='rules')
 
 for nr in config.NOISE_VALUES:
     results = []
-    for eval in range(config.AMOUNT_OF_EVALUATIONS):
-        results.append([])
-        print('Starting eval', eval)
 
-        seed = config.RANDOM_SEED + eval
+    with open('results' + config.EXPERIMENT_NAME + '.csv', 'w') as csvfile:
+        csvfile.writelines('seed,' + ','.join([alg + 'auc_pof,' + alg + 'prec_types' for alg in config.ALGORITHMS]) + '\n')
+        for eval in range(config.AMOUNT_OF_EVALUATIONS):
+            results.append([])
+            print('Starting eval', eval)
 
-        # Loading training data
-        train_data, pairs_of_train_data, types_of_train_data, \
-        partOf_of_pairs_of_train_data, _, _ = get_data("train", max_rows=1000000000, seed=seed)
+            seed = config.RANDOM_SEED + eval
 
-        # computing positive and negative examples for types and partof
-        idxs_of_positive_examples_of_partOf = np.where(partOf_of_pairs_of_train_data)[0]
-        idxs_of_negative_examples_of_partOf = np.where(partOf_of_pairs_of_train_data == False)[0]
+            # Loading training data
+            train_data, pairs_of_train_data, types_of_train_data, \
+            partOf_of_pairs_of_train_data, _, _ = get_data("train", max_rows=1000000000, seed=seed)
 
-        # Compute the prior mean for the current dataset
-        if 'prior' in config.ALGORITHMS:
-            with tf.Session(config=tf_config) as sess:
-                sess.run(tf.global_variables_initializer())
-                prior_mean = np.zeros(sess.run(KB_rules.num_params, {}))
+            # computing positive and negative examples for types and partof
+            idxs_of_positive_examples_of_partOf = np.where(partOf_of_pairs_of_train_data)[0]
+            idxs_of_negative_examples_of_partOf = np.where(partOf_of_pairs_of_train_data == False)[0]
 
-                feed_dict, _, _ = train_fn(with_facts=False, with_constraints=True, iterations=config.MAX_PRIOR_TRAINING_IT,
-                                           KB=KB_rules, prior_mean=prior_mean, prior_lambda=config.REGULARIZATION,
-                                           sess=sess, kb_label='prior_training')
+            # Compute the prior mean for the current dataset
+            if 'prior' in config.ALGORITHMS:
+                with tf.Session(config=tf_config) as sess:
+                    sess.run(tf.global_variables_initializer())
+                    prior_mean = np.zeros(sess.run(KB_rules.num_params, {}))
 
-                KB_rules.save(sess, 'prior')
+                    feed_dict, _, _ = train_fn(with_facts=False, with_constraints=True, iterations=config.MAX_PRIOR_TRAINING_IT,
+                                               KB=KB_rules, prior_mean=prior_mean, prior_lambda=config.REGULARIZATION,
+                                               sess=sess, kb_label='prior_training')
 
-                # Create the parameters for the informative prior
-                prior_mean = sess.run(KB_rules.omega, feed_dict)
+                    KB_rules.save(sess, 'prior')
 
-        for alg in config.ALGORITHMS:
-            lambda_2s = config.LAMBDA_2_VALUES if alg == 'prior' else [config.LAMBDA_2]
-            for lambda_2 in lambda_2s:
-                if alg == 'wconto':
-                    auc_pof, prec_types = train(KB_ontology, seed, alg=alg, noise_ratio=nr, prior_mean=None)
-                elif alg == 'wclogic':
-                    auc_pof, prec_types = train(KB_logical, seed, alg=alg, noise_ratio=nr, prior_mean=None)
-                else:
-                    auc_pof, prec_types = train(KB_full if alg == 'wc' else KB_facts, seed, alg=alg, noise_ratio=nr,
-                                                lambda_2=lambda_2, prior_mean=prior_mean if alg == 'prior' else None)
-                print('EVAL FINISHED')
-                print('eval', eval, 'AUC POF', auc_pof, 'prec types', prec_types)
-                results[eval].append(auc_pof)
-                results[eval].append(prec_types)
-    print('FINISHED THE COMPLETE RUN')
-    print('Results:')
-    for i in range(config.AMOUNT_OF_EVALUATIONS):
-        print('Evaluation', i, ':', results[i])
-    with open('results.csv', 'w') as csvfile:
-        csvfile.write(','.join([alg + 'auc_pof,' + alg + 'prec_types' for alg in config.ALGORITHMS]))
+                    # Create the parameters for the informative prior
+                    prior_mean = sess.run(KB_rules.omega, feed_dict)
+
+            for alg in config.ALGORITHMS:
+                lambda_2s = config.LAMBDA_2_VALUES if alg == 'prior' else [config.LAMBDA_2]
+                for lambda_2 in lambda_2s:
+                    if alg == 'wconto':
+                        auc_pof, prec_types = train(KB_ontology, seed, alg=alg, noise_ratio=nr, prior_mean=None)
+                    elif alg == 'wclogic':
+                        auc_pof, prec_types = train(KB_logical, seed, alg=alg, noise_ratio=nr, prior_mean=None)
+                    else:
+                        auc_pof, prec_types = train(KB_full if alg == 'wc' else KB_facts, seed, alg=alg, noise_ratio=nr,
+                                                    lambda_2=lambda_2, prior_mean=prior_mean if alg == 'prior' else None)
+                    print('EVAL FINISHED')
+                    print('eval', eval, 'AUC POF', auc_pof, 'prec types', prec_types)
+                    results[eval].append(auc_pof)
+                    results[eval].append(prec_types)
+
+            csvfile.writelines(str(seed) + ',' + ','.join([str(r) for r in results[eval]]) + '\n')
+        print('FINISHED THE COMPLETE RUN')
+        print('Results:')
         for i in range(config.AMOUNT_OF_EVALUATIONS):
-            csvfile.write(','.join([str(r) for r in results[i]]))
+            print('Evaluation', i, ':', results[i])
