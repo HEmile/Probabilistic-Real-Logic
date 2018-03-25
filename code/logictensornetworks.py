@@ -25,27 +25,27 @@ def PR(tensor):
     return tf.Print(tensor, [tf.shape(tensor), tensor.name, tensor], summarize=200000)
 
 
-def t_norm(literals, label=""):
+def t_norm(literals, label="", tnorm=config.TNORM):
     with tf.variable_scope('t_norm_' + label) as sc:
         list_of_literal_tensors = [lit.tensor for lit in literals]
         literals_tensor = tf.concat(list_of_literal_tensors, 1)
-        if config.TNORM == "product":
+        if tnorm == "product":
             result = 1.0 - tf.reduce_prod(1.0 - literals_tensor, 1, keep_dims=True)
-        if config.TNORM == "yager2":
+        if tnorm == "yager2":
             result = tf.minimum(1.0, tf.sqrt(tf.reduce_sum(tf.square(literals_tensor), 1, keep_dims=True)))
-        if config.TNORM == "luk":
+        if tnorm == "luk":
             result = tf.minimum(1.0, tf.reduce_sum(literals_tensor, 1, keep_dims=True))
-        if config.TNORM == "goedel":
+        if tnorm == "goedel":
             result = tf.reduce_max(literals_tensor, 1, keep_dims=True, name=label)
         return result
 
-def s_norm(literals, label=""):
+def s_norm(literals, label="", snorm=config.SNORM):
     with tf.variable_scope('s_norm' + label) as sc:
         list_of_literal_tensors = [lit.tensor for lit in literals]
         literals_tensor = tf.concat(list_of_literal_tensors, 1)
-        if config.TNORM == "product":
+        if snorm == "product":
             result = tf.reduce_prod(literals_tensor, 1, keep_dims=True)
-        if config.TNORM == "goedel":
+        if snorm == "goedel":
             result = tf.reduce_min(literals_tensor, 1, keep_dims=True, name=label)
         return result
 
@@ -260,6 +260,8 @@ class TypeClause(Clause):
 class ImplicationClause(Clause):
     def __init__(self, antecedent, consequent, label="", weight=1.0):
         with tf.variable_scope('ImplicationClause_' + label) as sc:
+            self.antecedent = antecedent
+            self.consequent = consequent
             self.weight = weight
             self.label = label
             self.literals = antecedent + consequent
@@ -268,10 +270,12 @@ class ImplicationClause(Clause):
             self.ant_tensor = tf.stop_gradient(s_norm(antecedent, label + "antecedent"))
             # Connect the consequent through the t-norm (or)
             self.con_tensor = t_norm(consequent, label + "consequent")
-            if config.TNORM == 'product':
+
+            # The implication is computed as not(p and not q) and follows the s-norm semantics
+            if config.SNORM == 'product':
                 self.tensor = 1 - self.ant_tensor*(1-self.con_tensor)
-            if config.TNORM == 'goedel':
-                self.tensor = tf.maximum(1-self.ant_tensor, self.con_tensor)
+            if config.SNORM == 'goedel':
+                self.tensor = 1 - tf.minimum(self.ant_tensor, 1-self.con_tensor)
             self.tensor = tf.reduce_mean(tf.log(self.tensor + config.EPSILON), name='satisfaction')
             # self.tensor = tf.reduce_mean(tf.multiply(tf.log(self.con_tensor + config.EPSILON), self.ant_tensor), name='satisfaction')
 
@@ -283,7 +287,7 @@ class KnowledgeBase:
             if not self.clauses:
                 self.tensor = tf.constant(1.0)
             else:
-                weights_tensor = tf.constant([cl.weight for cl in clauses])
+                weights_tensor = tf.stack([cl.weight for cl in clauses])
                 clauses_value_tensor = tf.stack([cl.tensor for cl in clauses], 0)
                 if config.CLAUSE_AGGREGATOR == "min":
                     print("clauses aggregator is min")
