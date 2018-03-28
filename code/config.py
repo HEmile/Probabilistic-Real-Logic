@@ -4,7 +4,7 @@ import numpy as np
 ############################################
 
 # Amount of iterations used to train the model
-MAX_TRAINING_ITERATIONS = 6000
+MAX_TRAINING_ITERATIONS = 7500
 
 # Amount of iterations used to train the informative prior. Only for alg = 'prior'
 MAX_PRIOR_TRAINING_IT = 140
@@ -16,13 +16,11 @@ FREQ_OF_FEED_DICT_GENERATION = 1
 FREQ_OF_SAVE = 10005
 
 # How often to print the current training loss
-FREQ_OF_PRINT = 100
+FREQ_OF_PRINT = 50
 
-FREQ_OF_TEST = 300
+FREQ_OF_TEST = 100
 
 PRINT_GRAD_DEBUG = False
-
-AMOUNT_OF_EVALUATIONS = 10
 
 # At what saturation (probability of knowledge base) to switch the feed dict. If a new feed dict is fed every iteration,
 # this does nothing.
@@ -55,12 +53,14 @@ DO_SEMI_SUPERVISED = True
 DATASET = 'indoor'
 
 # List. Return [True, False] to create models for both training with and without constraints.
-ALGORITHMS = ['prior', 'nc', 'wc']
-# ALGORITHMS = ['wc']
+# ALGORITHMS = ['prior', 'nc', 'wc']
+ALGORITHMS = ['wc']
 
 RANDOM_SEED = 1300
 
-EXPERIMENT_NAME = 'general_data_run2'
+AMOUNT_OF_EVALUATIONS = 10
+
+EXPERIMENT_NAME = 'general_data_run2_debug_grad_4'
 
 EPSILON = 0.000001
 
@@ -101,25 +101,33 @@ WEIGHT_POS_PARTOF_EXAMPLES = 1.
 
 WEIGHT_NEG_PARTOF_EXAMPLES = 1.
 
-WEIGHT_TYPES_EXAMPLES = 2.2
+WEIGHT_TYPES_EXAMPLES = 2.
 
-ITERATIONS_UNTIL_WEIGHT_SWAP = 20000
+ITERATIONS_UNTIL_WEIGHT_SWAP = 200000
 
 WEIGHT_ONTOLOGY_CLAUSES_START = 1.
 
 WEIGHT_ONTOLOGY_CLAUSES_END = 4.
 
 # Stops the gradients in p(x, y) clauses of the form \forall x, y: p(x, y) -> a(x, y)
-CAN_ONTOLOGY_TRAIN_PRECEDENT = False
+CAN_ONTOLOGY_TRAIN_PRECEDENT = True
 
 # This didn't really seem to matter
 CHEAT_SEMI_SUPERVISED = False
 
-USE_CLAUSE_FILTERING = False
+USE_CLAUSE_FILTERING = True
+
+CLAUSE_FILTER_THRESHOLD = 0.8
+
+USE_SMOOTH_FILTERING = False
+
+SMOOTH_FILTER_FREQ = 0.95
 
 USE_IMPLICATION_CLAUSES = False
 
-CLAUSE_FILTER_THRESHOLD = 0.9
+FILTER_MODUS_TOLLENS = True
+
+MODUS_TOLLENS_FILTER_FREQ = 1.
 
 #################
 # EVALUATION

@@ -75,6 +75,13 @@ def disjunction_of_literals(literals, label="no_label"):
         if config.FORALL_AGGREGATOR == "min":
             return tf.reduce_min(result, keep_dims=True, name=label)
 
+def clause_filter(clauses):
+    with tf.variable_scope('clause_filter') as sc:
+        if config.USE_SMOOTH_FILTERING:
+            return tf.multiply(clauses, tf.exp(-1 / config.SMOOTH_FILTER_FREQ * clauses))
+        else:
+            return tf.where(tf.greater(config.CLAUSE_FILTER_THRESHOLD, clauses),
+                                   clauses, tf.clip_by_value(clauses, 1, 1))
 
 # Domain defines a term-space. The domain is a subset of vectors in real^self.columns.
 # self.tensor is assigned with a feed dict to actually instantiate the domain with objects.
@@ -267,6 +274,7 @@ class ImplicationClause(Clause):
             self.literals = antecedent + consequent
             self.predicates = set([lit.predicate for lit in self.literals])
             # Connect the antecedent through the s-norm (and). Do not propagate gradients
+            self.ant_tensor = s_norm(antecedent, label + "antecedent")
             self.ant_tensor = tf.stop_gradient(s_norm(antecedent, label + "antecedent"))
             # Connect the consequent through the t-norm (or)
             self.con_tensor = t_norm(consequent, label + "consequent")
@@ -276,6 +284,8 @@ class ImplicationClause(Clause):
                 self.tensor = 1 - self.ant_tensor*(1-self.con_tensor)
             if config.SNORM == 'goedel':
                 self.tensor = 1 - tf.minimum(self.ant_tensor, 1-self.con_tensor)
+            if config.USE_CLAUSE_FILTERING:
+                self.tensor = clause_filter(self.tensor)
             self.tensor = tf.reduce_mean(tf.log(self.tensor + config.EPSILON), name='satisfaction')
             # self.tensor = tf.reduce_mean(tf.multiply(tf.log(self.con_tensor + config.EPSILON), self.ant_tensor), name='satisfaction')
 

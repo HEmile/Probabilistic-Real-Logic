@@ -137,7 +137,7 @@ def get_data(train_or_test_swritch, max_rows=10000000, data_ratio=config.RATIO_D
 
     partOf_of_pair_of_data = np.array([idx_whole_for_data[i] == j for p in pics for i in pics[p] for j in pics[p]])
 
-    print(len(pics), np.size(data))
+    print('pics', len(pics), 'data', np.size(data, 0))
 
     return data, pairs_of_data, types_of_data, partOf_of_pair_of_data, pairs_of_bb_idxs, pics
 

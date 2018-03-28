@@ -79,14 +79,14 @@ else:
                                            ltn.Literal(False, isPartOf, w0p0)],
                                           label="part_of_is_antisymmetric", weight=config.WEIGHT_LOGICAL_CLAUSES)]
 
-    clauses_for_parts_of_wholes = [ltn.Clause([ltn.Literal(False, isOfType[w], w1[w], disable_gradient=disable_prec_gradient),
-                                               ltn.Literal(False, isPartOf, pw[w], disable_gradient=disable_prec_gradient)] + \
-                                              [ltn.Literal(True, isOfType[p], p1[w]) for p in parts_of_whole[w]],
+    clauses_for_parts_of_wholes = [ltn.Clause([ltn.Literal(False, isOfType[w], w1[w], disable_gradient=disable_prec_gradient, name=w),
+                                               ltn.Literal(False, isPartOf, pw[w], disable_gradient=disable_prec_gradient, name='partOf')] + \
+                                              [ltn.Literal(True, isOfType[p], p1[w], p, name=p) for p in parts_of_whole[w]],
                                               label="parts_of_" + w, weight=config.WEIGHT_ONTOLOGY_CLAUSES) for w in parts_of_whole.keys()]
 
-    clauses_for_wholes_of_parts = [ltn.Clause([ltn.Literal(False, isOfType[p], p1[p], disable_gradient=disable_prec_gradient),
-                                               ltn.Literal(False, isPartOf, pw[p], disable_gradient=disable_prec_gradient)] +
-                                              [ltn.Literal(True, isOfType[w], w1[p]) for w in wholes_of_part[p]],
+    clauses_for_wholes_of_parts = [ltn.Clause([ltn.Literal(False, isOfType[p], p1[p], disable_gradient=disable_prec_gradient, name=p),
+                                               ltn.Literal(False, isPartOf, pw[p], disable_gradient=disable_prec_gradient, name='partOf')] +
+                                              [ltn.Literal(True, isOfType[w], w1[p], name=w) for w in wholes_of_part[p]],
                                               label="wholes_of_" + p, weight=config.WEIGHT_ONTOLOGY_CLAUSES) for p in wholes_of_part.keys()]
 partof_is_irreflexive = [ltn.Clause([ltn.Literal(False, isPartOf, oo)],
                                         label="part_of_is_irreflexive", weight=config.WEIGHT_LOGICAL_CLAUSES)]
@@ -169,6 +169,8 @@ def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lam
     random.seed(config.RANDOM_SEED)
     train_writer = tf.summary.FileWriter('logging/' + kb_label + '/train', graph=None)
     test_writer = tf.summary.FileWriter('logging/' + kb_label + '/test', graph=None)
+    modus_ponens_writer = tf.summary.FileWriter('logging/' + kb_label + '/modus_ponens', graph=None)
+    modus_tollens_writer = tf.summary.FileWriter('logging/' + kb_label + '/modus_tollens', graph=None)
 
     train_kb = True
     for i in range(iterations):
@@ -229,29 +231,47 @@ def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lam
 
             is_pair_of = partOF_of_pairs_of_test_data[chosen_pairs]
             bb_ids = pairs_of_bb_idxs_test[chosen_pairs]
-            correct_updates = 0
-            correct_conseq_updates = 0
-            wrong_updates = 0
-            num_pos_correct_updates = 0
-            num_ant_updates = 0
+
+            n_correct_conseq_reasoning = 0
+            n_wrong_conseq_reasoning = 0
+            n_correct_conseq_updates = 0
+            n_pos_correct_conseq_reasoning = 0
+            tot_conseq_grad_magn = 0
+
+            n_correct_ant_reasoning = 0
+            n_wrong_ant_reasoning = 0
+            n_correct_ant_updates = 0
+            n_pos_correct_ant_reasoning = 0
+            tot_ant_grad_magn = 0
+
+
             for r_i in range(len(rules_ontology)):
                 rule = rules_ontology[r_i]
                 wholes_of = rule in clauses_for_wholes_of_parts
-                print(' and '.join([l.name for l in rule.literals[:2]]) + "->" +
-                      ' or '.join([l.name for l in rule.literals[2:]]))
+                if config.PRINT_GRAD_DEBUG:
+                    print(' and '.join([l.name for l in rule.literals[:2]]) + "->" +
+                          ' or '.join([l.name for l in rule.literals[2:]]))
                 for j in range(len(chosen_pairs)):
                     label1, label2 = bb_ids[j][0], bb_ids[j][1]
                     t1 = types_of_test_data[label1]
                     t2 = types_of_test_data[label2]
                     x = t1 if wholes_of else t2
                     y = t2 if wholes_of else t1
-                    correct_conseq = y in [l.name for l in rule.literals[2:]]
-                    correct_update = is_pair_of[j] and x == rule.literals[0].name and correct_conseq
+                    conseq_true = y in [l.name for l in rule.literals[2:]]
+                    ant_true = is_pair_of[j] and x == rule.literals[0].name
+                    is_correct_conseq_reasoning = ant_true and conseq_true
+                    is_correct_ant_reasoning = (not ant_true) and (not conseq_true)
                     big_gradient = False
-                    if correct_update:
-                        num_pos_correct_updates += 1
+                    if is_correct_conseq_reasoning:
+                        n_pos_correct_conseq_reasoning += 1
+                    if is_correct_ant_reasoning:
+                        n_pos_correct_ant_reasoning += 1
                     if config.USE_IMPLICATION_CLAUSES:
                         conjunct = literals[r_i][j, :]
+
+                        # When using implication clauses, we can only update the consequence as we set the
+                        # gradients of the antecedents to 0
+                        is_conseq_updated = True
 
                         if config.TNORM == 'product':
                             cons_p = 1 - np.prod(1 - conjunct[2:])
@@ -261,6 +281,13 @@ def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lam
                         if config.SNORM == 'product':
                             ant_p = np.prod(conjunct[:2])
                             truth_val = 1-ant_p*(1-cons_p)
+
+                        filter_truth = 1
+                        if config.USE_CLAUSE_FILTERING:
+                            if not config.USE_SMOOTH_FILTERING and truth_val > config.CLAUSE_FILTER_THRESHOLD:
+                                continue
+                            elif config.USE_SMOOTH_FILTERING:
+                                filter_truth = (1-truth_val) * np.exp(-(1/config.SMOOTH_FILTER_FREQ) * truth_val)
 
                         if config.TNORM == 'goedel' and config.SNORM == 'product':
                             def calc_grad(index_in_conj):
@@ -275,36 +302,53 @@ def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lam
                         gradients = [0, 0]
 
                         for z in range(len(conjunct) - 2):
-                            grad = calc_grad(z)
+                            grad = calc_grad(z) * filter_truth
                             gradients.append(grad)
-                            if grad > 0.1:
+                            if np.abs(grad) > 0.1:
                                 big_gradient = True
+                                tot_conseq_grad_magn += np.abs(grad)
                         if big_gradient and config.PRINT_GRAD_DEBUG:
-                            print(correct_update, is_pair_of[j], t1, t2, truth_val, ant_p, cons_p,
+                            print(is_correct_conseq_reasoning, is_pair_of[j], t1, t2, truth_val, ant_p, cons_p,
                                   np.log(truth_val))
                     else:
                         gradients = []
+                        is_ant_updated = False
+                        is_conseq_updated = False
                         for z in range(len(rule.literals)):
                             g = np.prod([1 - (0 if y == z else literals[r_i][j, y])
                                                       for y in range(len(rule.literals))])
                             gradients.append(g)
+                            g = np.abs(g)
                             if g > 0.1:
                                 big_gradient = True
                                 if z < 2:
-                                    num_ant_updates += 1
+                                    is_ant_updated = True
+                                    tot_ant_grad_magn += g
+                                else:
+                                    is_conseq_updated = True
+                                    tot_conseq_grad_magn += g
+                        if is_ant_updated:
+                            if is_correct_ant_reasoning:
+                                n_correct_ant_reasoning += 1
+                            else:
+                                n_wrong_ant_reasoning += 1
+                            if not ant_true:
+                                n_correct_ant_updates += 1
                         if big_gradient and config.PRINT_GRAD_DEBUG:
-                            print(is_pair_of[j], t1, t2, 1 - np.prod(1 - literals[r_i][j, :]))
+                            print(is_ant_updated, is_conseq_updated, is_pair_of[j], t1, t2, 1 - np.prod(1 - literals[r_i][j, :]))
                     if big_gradient:
-                        if correct_update:
-                            correct_updates += 1
-                        else:
-                            wrong_updates += 1
-                        if correct_conseq:
-                            correct_conseq_updates += 1
+                        if is_conseq_updated:
+                            if is_correct_conseq_reasoning:
+                                n_correct_conseq_reasoning += 1
+                            else:
+                                n_wrong_conseq_reasoning += 1
+                            if conseq_true:
+                                n_correct_conseq_updates += 1
                         if config.PRINT_GRAD_DEBUG:
                             print(literals[r_i][j, :])
                             print(gradients)
-            # np.savetxt('literaldebug/' + config.EXPERIMENT_NAME + str(i), literals)
+
+            # Compute AUC of partof and precision of types
             cm = compute_confusion_matrix_pof(config.THRESHOLDS, values_of_partOf,
                                               pairs_of_test_data, partOF_of_pairs_of_test_data)
             measures = {}
@@ -318,30 +362,70 @@ def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lam
             correct = np.where(max_type_labels == types_of_test_data)[0]
             prec_types = len(correct) / len(max_type_labels)
 
-            num_gradient_updates = correct_updates+wrong_updates
-            prec_gradient_update = 0 if num_gradient_updates == 0 else correct_updates/num_gradient_updates
-            prec_conseq_update = 1 if num_gradient_updates == 0 else correct_conseq_updates / num_gradient_updates
-            recall_gradient_update = correct_updates / num_pos_correct_updates
-            f1_gradient_update = 0 if num_gradient_updates == 0 else\
-                2/(1/recall_gradient_update + 1/prec_gradient_update)
-            ratio_ant_updates = 0 if num_gradient_updates == 0 else num_ant_updates / num_gradient_updates
+            # Creating IR measures for the consequent updating
+            n_conseq_gradient_updates = n_correct_conseq_reasoning+n_wrong_conseq_reasoning
+            prec_conseq_gradient_update = recall_conseq_gradient_update = \
+                f1_conseq_gradient_update = prec_conseq_update = avg_conseq_grad_magn = 0
+            if n_conseq_gradient_updates > 0:
+                prec_conseq_gradient_update = n_correct_conseq_reasoning/n_conseq_gradient_updates
+                recall_conseq_gradient_update = n_correct_conseq_reasoning / n_pos_correct_conseq_reasoning
+                prec_conseq_update = n_correct_conseq_updates / n_conseq_gradient_updates
+                f1_conseq_gradient_update = 0 if recall_conseq_gradient_update == 0 or prec_conseq_gradient_update == 0 \
+                    else 2/(1/recall_conseq_gradient_update + 1/prec_conseq_gradient_update)
+                avg_conseq_grad_magn = tot_conseq_grad_magn / n_conseq_gradient_updates
+
+            # Creating IR measures for the antecedent updating
+            n_ant_gradient_updates = n_correct_ant_reasoning + n_wrong_ant_reasoning
+            prec_ant_gradient_update = recall_ant_gradient_update = f1_ant_gradient_update = prec_ant_update = avg_ant_grad_magn = 0
+            if n_ant_gradient_updates > 0:
+                prec_ant_gradient_update = n_correct_ant_reasoning / n_ant_gradient_updates
+                recall_ant_gradient_update = n_correct_ant_reasoning / n_pos_correct_ant_reasoning
+                prec_ant_update = n_correct_ant_updates / n_ant_gradient_updates
+                f1_ant_gradient_update = 0 if recall_ant_gradient_update == 0 or prec_ant_gradient_update == 0 \
+                    else 2 / (1 / recall_ant_gradient_update + 1 / prec_ant_gradient_update)
+                avg_ant_grad_magn = tot_ant_grad_magn / n_ant_gradient_updates
+
+            tot_grad_magn = tot_conseq_grad_magn + tot_ant_grad_magn
+            fract_conseq_gradient = 0 if tot_grad_magn == 0 else \
+                tot_conseq_grad_magn / tot_grad_magn
+            fract_ant_gradient = 0 if tot_grad_magn == 0 else \
+                tot_ant_grad_magn / tot_grad_magn
 
             summary_t = tf.Summary(value=[
                 tf.Summary.Value(tag="test/auc_pof", simple_value=auc_pof),
                 tf.Summary.Value(tag="test/prec_types", simple_value=prec_types),
-                tf.Summary.Value(tag="grad_debug/prec_update", simple_value=prec_gradient_update),
-                tf.Summary.Value(tag="grad_debug/num_update", simple_value=num_gradient_updates),
-                tf.Summary.Value(tag="grad_debug/prec_conseq_update", simple_value=prec_conseq_update),
-                tf.Summary.Value(tag="grad_debug/recall_update", simple_value=recall_gradient_update),
-                tf.Summary.Value(tag="grad_debug/f1_update", simple_value=f1_gradient_update),
-                tf.Summary.Value(tag="grad_debug/ratio_ant_update", simple_value=ratio_ant_updates)
+            ])
+
+            summary_mp = tf.Summary(value=[
+                tf.Summary.Value(tag="gradients/prec_reasoning", simple_value=prec_conseq_gradient_update),
+                tf.Summary.Value(tag="gradients/recall_reasoning", simple_value=recall_conseq_gradient_update),
+                tf.Summary.Value(tag="gradients/f1_reasoning", simple_value=f1_conseq_gradient_update),
+                tf.Summary.Value(tag="gradients/num_update", simple_value=n_conseq_gradient_updates),
+                tf.Summary.Value(tag="gradients/prec_update", simple_value=prec_conseq_update),
+                tf.Summary.Value(tag="gradients/avg_magnitude_update", simple_value=avg_conseq_grad_magn),
+                tf.Summary.Value(tag="gradients/ratio_of_gradient", simple_value=fract_conseq_gradient)
+            ])
+
+            summary_mt = tf.Summary(value=[
+                tf.Summary.Value(tag="gradients/prec_reasoning", simple_value=prec_ant_gradient_update),
+                tf.Summary.Value(tag="gradients/recall_reasoning", simple_value=recall_ant_gradient_update),
+                tf.Summary.Value(tag="gradients/f1_reasoning", simple_value=f1_ant_gradient_update),
+                tf.Summary.Value(tag="gradients/num_update", simple_value=n_ant_gradient_updates),
+                tf.Summary.Value(tag="gradients/prec_update", simple_value=prec_ant_update),
+                tf.Summary.Value(tag="gradients/avg_magnitude_update", simple_value=avg_ant_grad_magn),
+                tf.Summary.Value(tag="gradients/ratio_of_gradient", simple_value=fract_ant_gradient)
             ])
 
             test_writer.add_summary(summary_r, i)
             test_writer.add_summary(summary_t, i)
 
+            modus_ponens_writer.add_summary(summary_mp, i)
+            modus_tollens_writer.add_summary(summary_mt, i)
+
     train_writer.flush()
     test_writer.flush()
+    modus_ponens_writer.flush()
+    modus_tollens_writer.flush()
 
     return feed_dict, auc_pof, prec_types
 
