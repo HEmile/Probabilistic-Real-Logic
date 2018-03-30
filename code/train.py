@@ -63,15 +63,13 @@ if config.USE_IMPLICATION_CLAUSES:
         ltn.ImplicationClause(antecedent=[ltn.Literal(True, isOfType[w], w1[w], name=w),
                                           ltn.Literal(True, isPartOf, pw[w], name='partOf')],
                    consequent=[ltn.Literal(True, isOfType[p], p1[w], name=p) for p in parts_of_whole[w]],
-                   label="parts_of_" + w, weight=weight_ontology) for w in parts_of_whole.keys()
-                    if len(parts_of_whole[w]) > 0]
+                   label="parts_of_" + w, weight=weight_ontology) for w in parts_of_whole.keys()]
 
     clauses_for_wholes_of_parts = [
         ltn.ImplicationClause(antecedent=[ltn.Literal(True, isOfType[p], p1[p], name=p),
                                           ltn.Literal(True, isPartOf, pw[p], name='partOf')],
                    consequent=[ltn.Literal(True, isOfType[w], w1[p], name=w) for w in wholes_of_part[p]],
-                   label="wholes_of_" + p, weight=weight_ontology) for p in wholes_of_part.keys()
-                    if len(wholes_of_part[p]) > 0]
+                   label="wholes_of_" + p, weight=weight_ontology) for p in wholes_of_part.keys()]
 else:
     disable_prec_gradient = not config.CAN_ONTOLOGY_TRAIN_PRECEDENT
 
@@ -82,12 +80,14 @@ else:
     clauses_for_parts_of_wholes = [ltn.Clause([ltn.Literal(False, isOfType[w], w1[w], disable_gradient=disable_prec_gradient, name=w),
                                                ltn.Literal(False, isPartOf, pw[w], disable_gradient=disable_prec_gradient, name='partOf')] + \
                                               [ltn.Literal(True, isOfType[p], p1[w], p, name=p) for p in parts_of_whole[w]],
-                                              label="parts_of_" + w, weight=config.WEIGHT_ONTOLOGY_CLAUSES) for w in parts_of_whole.keys()]
+                                              label="parts_of_" + w, weight=config.WEIGHT_ONTOLOGY_CLAUSES) for w in parts_of_whole.keys()
+                                                if len(parts_of_whole[w]) > 0]
 
     clauses_for_wholes_of_parts = [ltn.Clause([ltn.Literal(False, isOfType[p], p1[p], disable_gradient=disable_prec_gradient, name=p),
                                                ltn.Literal(False, isPartOf, pw[p], disable_gradient=disable_prec_gradient, name='partOf')] +
                                               [ltn.Literal(True, isOfType[w], w1[p], name=w) for w in wholes_of_part[p]],
-                                              label="wholes_of_" + p, weight=config.WEIGHT_ONTOLOGY_CLAUSES) for p in wholes_of_part.keys()]
+                                              label="wholes_of_" + p, weight=config.WEIGHT_ONTOLOGY_CLAUSES) for p in wholes_of_part.keys()
+                                              if len(wholes_of_part[p]) > 0]
 partof_is_irreflexive = [ltn.Clause([ltn.Literal(False, isPartOf, oo)],
                                         label="part_of_is_irreflexive", weight=config.WEIGHT_LOGICAL_CLAUSES)]
 # if not config.USE_MUTUAL_EXCL_PREDICATES:
@@ -222,12 +222,20 @@ def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lam
 
             feed_dict_rules(feed_dict, pairs_of_test_data[chosen_pairs])
 
-            outputs = sess.run([predicted_types_values_tensor, predicted_partOf_value_tensor,
-                    rules_summary] + literal_debug1, feed_dict)
+            tensors_to_retrieve = [predicted_types_values_tensor, predicted_partOf_value_tensor, rules_summary] \
+                                  + grad_MP_tensors + grad_MT_tensors + literal_debug1
+
+            outputs = sess.run(tensors_to_retrieve, feed_dict)
             values_of_types = outputs[0]
             values_of_partOf = outputs[1]
             summary_r = outputs[2]
-            literals = outputs[3:]
+            r_ind = 3
+            if config.USE_IMPLICATION_CLAUSES:
+                grad_MP = outputs[3:3+len(rules_ontology)]
+                r_ind = 3 + 2 * len(rules_ontology)
+                grad_MT = outputs[3 + len(rules_ontology):r_ind]
+
+            literals = outputs[r_ind:]
 
             is_pair_of = partOF_of_pairs_of_test_data[chosen_pairs]
             bb_ids = pairs_of_bb_idxs_test[chosen_pairs]
@@ -261,55 +269,65 @@ def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lam
                     ant_true = is_pair_of[j] and x == rule.literals[0].name
                     is_correct_conseq_reasoning = ant_true and conseq_true
                     is_correct_ant_reasoning = (not ant_true) and (not conseq_true)
-                    big_gradient = False
                     if is_correct_conseq_reasoning:
                         n_pos_correct_conseq_reasoning += 1
                     if is_correct_ant_reasoning:
                         n_pos_correct_ant_reasoning += 1
                     if config.USE_IMPLICATION_CLAUSES:
                         conjunct = literals[r_i][j, :]
+                        if config.NORMALIZE_PONENS_TOLLENS:
+                            grad_mp_xy = grad_MP[r_i][j]
+                            grad_mt_xy = grad_MT[r_i][j]
+                            tot_conseq_grad_magn += grad_mp_xy
+                            tot_ant_grad_magn += grad_mt_xy
 
-                        # When using implication clauses, we can only update the consequence as we set the
-                        # gradients of the antecedents to 0
-                        is_conseq_updated = True
+                            # This check is likely not possible as gradients are normalized
+                            is_conseq_updated = grad_mp_xy > 0.1
+                            is_ant_updated = grad_mt_xy > 0.1
 
-                        if config.TNORM == 'product':
-                            cons_p = 1 - np.prod(1 - conjunct[2:])
-                        if config.TNORM == 'goedel':
-                            cons_p = np.max(conjunct[2:])
+                        else:
+                            # When using MT disabled implication clauses, we can only update the consequence as we set the
+                            # gradients of the antecedents to 0
+                            is_conseq_updated = False
+                            is_ant_updated = False
 
-                        if config.SNORM == 'product':
-                            ant_p = np.prod(conjunct[:2])
-                            truth_val = 1-ant_p*(1-cons_p)
+                            if config.TNORM == 'product':
+                                cons_p = 1 - np.prod(1 - conjunct[2:])
+                            if config.TNORM == 'goedel':
+                                cons_p = np.max(conjunct[2:])
 
-                        filter_truth = 1
-                        if config.USE_CLAUSE_FILTERING:
-                            if not config.USE_SMOOTH_FILTERING and truth_val > config.CLAUSE_FILTER_THRESHOLD:
-                                continue
-                            elif config.USE_SMOOTH_FILTERING:
-                                filter_truth = (1-truth_val) * np.exp(-(1/config.SMOOTH_FILTER_FREQ) * truth_val)
+                            if config.SNORM == 'product':
+                                ant_p = np.prod(conjunct[:2])
+                                truth_val = 1-ant_p*(1-cons_p)
 
-                        if config.TNORM == 'goedel' and config.SNORM == 'product':
-                            def calc_grad(index_in_conj):
-                                is_max = np.argmax(conjunct[2:]) == index_in_conj
-                                return is_max * ant_p /truth_val
+                            filter_truth = 1
+                            if config.USE_CLAUSE_FILTERING:
+                                if not config.USE_SMOOTH_FILTERING and truth_val > config.CLAUSE_FILTER_THRESHOLD:
+                                    continue
+                                elif config.USE_SMOOTH_FILTERING:
+                                    filter_truth = (1-truth_val) * np.exp(-(1/config.SMOOTH_FILTER_FREQ) * truth_val)
 
-                        if config.TNORM == 'product' and config.SNORM == 'product':
-                            def calc_grad(index_in_conj):
-                                conj2 = list(conjunct[2:])
-                                conj2[index_in_conj] = 0
-                                return ant_p * np.prod(1-np.array(conj2))/truth_val
-                        gradients = [0, 0]
+                            if config.TNORM == 'goedel' and config.SNORM == 'product':
+                                def calc_grad(index_in_conj):
+                                    is_max = np.argmax(conjunct[2:]) == index_in_conj
+                                    return is_max * ant_p /truth_val
 
-                        for z in range(len(conjunct) - 2):
-                            grad = calc_grad(z) * filter_truth
-                            gradients.append(grad)
-                            if np.abs(grad) > 0.1:
-                                big_gradient = True
-                                tot_conseq_grad_magn += np.abs(grad)
-                        if big_gradient and config.PRINT_GRAD_DEBUG:
-                            print(is_correct_conseq_reasoning, is_pair_of[j], t1, t2, truth_val, ant_p, cons_p,
-                                  np.log(truth_val))
+                            if config.TNORM == 'product' and config.SNORM == 'product':
+                                def calc_grad(index_in_conj):
+                                    conj2 = list(conjunct[2:])
+                                    conj2[index_in_conj] = 0
+                                    return ant_p * np.prod(1-np.array(conj2))/truth_val
+                            gradients = [0, 0]
+
+                            for z in range(len(conjunct) - 2):
+                                grad = calc_grad(z) * filter_truth
+                                gradients.append(grad)
+                                if np.abs(grad) > 0.1:
+                                    is_conseq_updated = True
+                                    tot_conseq_grad_magn += np.abs(grad)
+                            if is_conseq_updated and config.PRINT_GRAD_DEBUG:
+                                print(is_correct_conseq_reasoning, is_pair_of[j], t1, t2, truth_val, ant_p, cons_p,
+                                      np.log(truth_val))
                     else:
                         gradients = []
                         is_ant_updated = False
@@ -327,26 +345,26 @@ def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lam
                                 else:
                                     is_conseq_updated = True
                                     tot_conseq_grad_magn += g
-                        if is_ant_updated:
-                            if is_correct_ant_reasoning:
-                                n_correct_ant_reasoning += 1
-                            else:
-                                n_wrong_ant_reasoning += 1
-                            if not ant_true:
-                                n_correct_ant_updates += 1
                         if big_gradient and config.PRINT_GRAD_DEBUG:
                             print(is_ant_updated, is_conseq_updated, is_pair_of[j], t1, t2, 1 - np.prod(1 - literals[r_i][j, :]))
-                    if big_gradient:
-                        if is_conseq_updated:
-                            if is_correct_conseq_reasoning:
-                                n_correct_conseq_reasoning += 1
-                            else:
-                                n_wrong_conseq_reasoning += 1
-                            if conseq_true:
-                                n_correct_conseq_updates += 1
-                        if config.PRINT_GRAD_DEBUG:
-                            print(literals[r_i][j, :])
-                            print(gradients)
+
+                    if is_conseq_updated:
+                        if is_correct_conseq_reasoning:
+                            n_correct_conseq_reasoning += 1
+                        else:
+                            n_wrong_conseq_reasoning += 1
+                        if conseq_true:
+                            n_correct_conseq_updates += 1
+                    if is_ant_updated:
+                        if is_correct_ant_reasoning:
+                            n_correct_ant_reasoning += 1
+                        else:
+                            n_wrong_ant_reasoning += 1
+                        if not ant_true:
+                            n_correct_ant_updates += 1
+                    if (is_conseq_updated or is_ant_updated) and config.PRINT_GRAD_DEBUG:
+                        print(literals[r_i][j, :])
+                        print(gradients)
 
             # Compute AUC of partof and precision of types
             cm = compute_confusion_matrix_pof(config.THRESHOLDS, values_of_partOf,
@@ -553,6 +571,12 @@ for literal in clause_to_debug.literals:
 clause_to_debug = clauses_for_parts_of_wholes[0]
 literal_debug1 = [tf.concat([literal.tensor for literal in rule.literals], axis=1)
     for rule in rules_ontology]
+
+grad_MP_tensors = []
+grad_MT_tensors = []
+if config.USE_IMPLICATION_CLAUSES:
+    grad_MP_tensors = [rule.grad_mp for rule in rules_ontology]
+    grad_MT_tensors = [rule.grad_mt for rule in rules_ontology]
 
 # Lists all predicates
 predicates = list(isOfType.values()) + [isPartOf]

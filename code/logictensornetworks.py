@@ -273,20 +273,39 @@ class ImplicationClause(Clause):
             self.label = label
             self.literals = antecedent + consequent
             self.predicates = set([lit.predicate for lit in self.literals])
-            # Connect the antecedent through the s-norm (and). Do not propagate gradients
-            self.ant_tensor = s_norm(antecedent, label + "antecedent")
-            self.ant_tensor = tf.stop_gradient(s_norm(antecedent, label + "antecedent"))
-            # Connect the consequent through the t-norm (or)
-            self.con_tensor = t_norm(consequent, label + "consequent")
-
-            # The implication is computed as not(p and not q) and follows the s-norm semantics
+            # Connect the antecedent through the s-norm (and).
+            self.P = s_norm(antecedent, label + "antecedent")
+            if consequent:
+                self.Q = t_norm(consequent, label + "consequent")
+            else:
+                # This means the antecedent just has to be true
+                self.Q = 0
+            # The implication is computed as not(p and not q) and thus follows the s-norm semantics
             if config.SNORM == 'product':
-                self.tensor = 1 - self.ant_tensor*(1-self.con_tensor)
+                self.truth_val = 1 - self.P * (1 - self.Q)
             if config.SNORM == 'goedel':
-                self.tensor = 1 - tf.minimum(self.ant_tensor, 1-self.con_tensor)
-            if config.USE_CLAUSE_FILTERING:
-                self.tensor = clause_filter(self.tensor)
-            self.tensor = tf.reduce_mean(tf.log(self.tensor + config.EPSILON), name='satisfaction')
+                self.truth_val = 1 - tf.minimum(self.P, 1 - self.Q)
+            self.grad_mp = tf.div(self.P, self.truth_val)
+            self.grad_mt = tf.div(1 - self.Q, self.truth_val)
+            if config.NORMALIZE_PONENS_TOLLENS:
+                # Assuming product norm
+                self.not_P = 1 - self.P
+
+                # self.grad_mp = 0.5 * tf.stop_gradient(tf.div(self.grad_mp, tf.reduce_sum(self.grad_mp)))
+                # self.grad_mt = 0.5 * tf.stop_gradient(tf.div(self.grad_mt, tf.reduce_sum(self.grad_mt)))
+
+                self.grad_mp = tf.div(self.grad_mp, tf.reduce_sum(self.grad_mp))
+                self.grad_mt = tf.div(self.grad_mt, tf.reduce_sum(self.grad_mt))
+
+                self.tensor = tf.reduce_sum(tf.multiply(self.grad_mp, self.Q) + tf.multiply(self.grad_mt, self.not_P))
+            else:
+                # Do not propagate gradients (Disable modus tollens)
+                self.P = tf.stop_gradient(self.P)
+                # Connect the consequent through the t-norm (or)
+
+                if config.USE_CLAUSE_FILTERING:
+                    self.tensor = clause_filter(self.tensor)
+                self.tensor = tf.reduce_mean(tf.log(self.truth_val + config.EPSILON), name='satisfaction')
             # self.tensor = tf.reduce_mean(tf.multiply(tf.log(self.con_tensor + config.EPSILON), self.ant_tensor), name='satisfaction')
 
 class KnowledgeBase:

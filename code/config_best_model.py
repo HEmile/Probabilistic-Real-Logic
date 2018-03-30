@@ -4,10 +4,10 @@ import numpy as np
 ############################################
 
 # Amount of iterations used to train the model
-MAX_TRAINING_ITERATIONS = 6000
+MAX_TRAINING_ITERATIONS = 400000
 
 # Amount of iterations used to train the informative prior. Only for alg = 'prior'
-MAX_PRIOR_TRAINING_IT = 140
+MAX_PRIOR_TRAINING_IT = 2000
 
 # How often to change the data that's used to compute the gradient. 1 is recommended for pure stochastic descent
 FREQ_OF_FEED_DICT_GENERATION = 1
@@ -16,11 +16,11 @@ FREQ_OF_FEED_DICT_GENERATION = 1
 FREQ_OF_SAVE = 10005
 
 # How often to print the current training loss
-FREQ_OF_PRINT = 50
+FREQ_OF_PRINT = 100
 
-FREQ_OF_TEST = 100
+FREQ_OF_TEST = 300
 
-PRINT_GRAD_DEBUG = False
+AMOUNT_OF_EVALUATIONS = 10
 
 # At what saturation (probability of knowledge base) to switch the feed dict. If a new feed dict is fed every iteration,
 # this does nothing.
@@ -41,7 +41,7 @@ N_NEG_EXAMPLES_PARTOF = 80
 number_of_pairs_for_axioms = 400
 
 # TODO: This used to be too high with 2000... We need to calculate why it is so bad at constraining its memory.
-NUMBER_PAIRS_AXIOMS_TESTING = 2000
+NUMBER_PAIRS_AXIOMS_TESTING = 4000
 
 RATIO_DATA = [0.003]
 
@@ -53,14 +53,12 @@ DO_SEMI_SUPERVISED = True
 DATASET = 'indoor'
 
 # List. Return [True, False] to create models for both training with and without constraints.
-# ALGORITHMS = ['nc', 'wc']
+# ALGORITHMS = ['prior', 'nc', 'wc']
 ALGORITHMS = ['wc']
 
 RANDOM_SEED = 1300
 
-AMOUNT_OF_EVALUATIONS = 10
-
-EXPERIMENT_NAME = 'general_data_no_empty_rules_no_impl_clause'
+EXPERIMENT_NAME = 'fuck_de_morgan_swap_weight_onto4'
 
 EPSILON = 0.000001
 
@@ -81,7 +79,7 @@ REGULARIZATION = 1e-8
 
 LAMBDA_2 = 1e-7
 
-TNORM = "product"
+TNORM = "goedel"
 
 SNORM = "product"
 
@@ -93,7 +91,7 @@ CLAUSE_AGGREGATOR = "w-log-likelihood"
 
 OPTIMIZER = 'rmsprop'
 
-WEIGHT_ONTOLOGY_CLAUSES = 1.0
+WEIGHT_ONTOLOGY_CLAUSES = 100.0
 
 WEIGHT_LOGICAL_CLAUSES = 1.
 
@@ -103,29 +101,23 @@ WEIGHT_NEG_PARTOF_EXAMPLES = 1.
 
 WEIGHT_TYPES_EXAMPLES = 2.
 
-ITERATIONS_UNTIL_WEIGHT_SWAP = 200000
+ITERATIONS_UNTIL_WEIGHT_SWAP = 20000
 
-WEIGHT_ONTOLOGY_CLAUSES_START = 1.
+WEIGHT_ONTOLOGY_CLAUSES_START = 2.
 
 WEIGHT_ONTOLOGY_CLAUSES_END = 4.
 
 # Stops the gradients in p(x, y) clauses of the form \forall x, y: p(x, y) -> a(x, y)
-CAN_ONTOLOGY_TRAIN_PRECEDENT = True
+CAN_ONTOLOGY_TRAIN_PRECEDENT = False
 
 # This didn't really seem to matter
 CHEAT_SEMI_SUPERVISED = False
 
-USE_CLAUSE_FILTERING = False
+USE_CLAUSE_FILTERING = True
 
-CLAUSE_FILTER_THRESHOLD = 0.8
+USE_IMPLICATION_CLAUSES = True
 
-USE_SMOOTH_FILTERING = False
-
-SMOOTH_FILTER_FREQ = 0.95
-
-USE_IMPLICATION_CLAUSES = False
-
-NORMALIZE_PONENS_TOLLENS = False
+CLAUSE_FILTER_THRESHOLD = 0.9
 
 #################
 # EVALUATION
@@ -134,3 +126,6 @@ NORMALIZE_PONENS_TOLLENS = False
 THRESHOLDS = np.arange(.00, 1.1, .05)
 
 EVAL_ALGORITHMS = ['prior_l2_0.001', 'prior_l2_0.0001', 'prior_l2_1e-06', 'wc','nc']
+
+PRINT_DEBUG = True
+
