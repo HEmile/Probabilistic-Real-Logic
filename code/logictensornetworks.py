@@ -279,7 +279,7 @@ class ImplicationClause(Clause):
                 self.Q = t_norm(consequent, label + "consequent")
             else:
                 # This means the antecedent just has to be true
-                self.Q = 0
+                self.Q = 0.0
             # The implication is computed as not(p and not q) and thus follows the s-norm semantics
             if config.SNORM == 'product':
                 self.truth_val = 1 - self.P * (1 - self.Q)
@@ -301,6 +301,7 @@ class ImplicationClause(Clause):
             else:
                 # Do not propagate gradients (Disable modus tollens)
                 self.P = tf.stop_gradient(self.P)
+                self.grad_mt = 0 * self.grad_mt
                 # Connect the consequent through the t-norm (or)
 
                 if config.USE_CLAUSE_FILTERING:
