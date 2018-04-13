@@ -57,10 +57,10 @@ ALGORITHMS = ['wc']
 RANDOM_SEED = 1300
 
 # Rerun the current setup this amount of times. The seeds used are RANDOM_SEED to RANDOM_SEED + AMOUNT_OF_EVALUATIONS
-AMOUNT_OF_EVALUATIONS = 10
+AMOUNT_OF_EVALUATIONS = 20
 
 # Output name used in experiments
-EXPERIMENT_NAME = 'lolfme'
+EXPERIMENT_NAME = 'no_MT_rerun'
 
 # Used for preventing NaN's in some computations
 EPSILON = 0.000001
@@ -128,7 +128,11 @@ SMOOTH_FILTER_FREQ = 1.0
 USE_IMPLICATION_CLAUSES = True
 
 # Normalizes the magnitude of the Modus Ponens and Modus Tollens gradients as explained in the paper.
-NORMALIZE_PONENS_TOLLENS = True
+NORMALIZE_PONENS_TOLLENS = False
+
+# Stops gradients from flowing into p(x, y) in clauses of the form p(x, y) -> q(x, y). Not recommended
+# in combination with the previous option.
+STOP_MODUS_TOLLENS_UPDATES = True
 
 # (Untested). Adds a penalty to the loss function for each positive literal in the batch.
 POSITIVE_FACT_PENALTY = 0.
