@@ -288,18 +288,14 @@ def train_fn(with_facts, with_constraints, iterations, KB, prior_mean, prior_lam
                         grad_mp_xy = grad_MP[r_i][j]
                         grad_mt_xy = grad_MT[r_i][j]
                     else:
-                        # TODO: Update
-                        gradients = []
-                        for z in range(len(rule.literals)):
-                            g = np.prod([1 - (0 if y == z else literals[r_i][j, y])
-                                                      for y in range(len(rule.literals))])
-                            gradients.append(g)
-                            g = np.abs(g)
-                            if g > 0.1:
-                                if z < 2:
-                                    tot_mt_grad_magn += g
-                                else:
-                                    tot_mp_grad_magn += g
+                        p_1 = literals[r_i][j, 0]
+                        p_2 = literals[r_i][j, 1]
+                        Q = literals[r_i][j, 2:]
+                        nP_t = p_1 + p_2 - p_1 * p_2
+                        Q_t = 1- np.prod([1-y for y in Q])
+                        truth_val = nP_t + Q_t - nP_t * Q_t
+                        grad_mp_xy = (1-nP_t) / truth_val
+                        grad_mt_xy = (1-Q_t) / truth_val
 
                     tot_mp_grad_magn += grad_mp_xy
                     tot_mt_grad_magn += grad_mt_xy
